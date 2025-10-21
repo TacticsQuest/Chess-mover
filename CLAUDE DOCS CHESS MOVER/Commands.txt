@@ -1,0 +1,4 @@
+  # For any other project
+  cd "C:\Users\David\Documents\GitHub\[ProjectName]"
+  cp -r "../.agent-template" ".agent"
+  # Edit .agent/context.md with project details

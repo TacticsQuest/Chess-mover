@@ -1,0 +1,89 @@
+# Advanced Settings Configuration
+# These settings control experimental and advanced features.
+# Most users should keep these at default values.
+
+# Capture Piece Removal Strategies
+capture_removal:
+  # Primary strategy: smart_storage (default and recommended)
+  primary_strategy: "smart_storage"
+
+  # Fallback strategies when primary is unavailable
+  # Set to false to disable a fallback strategy
+  edge_push:
+    enabled: false  # Edge push for boards without storage
+    push_speed_mm_min: 300  # Slow controlled push
+    push_distance_mm: 30  # Distance to push piece off board
+
+  tool_pusher:
+    enabled: false  # Tool-based pusher (requires physical tool)
+    tool_holder_square: "a9"  # Where pusher tool is stored
+    tool_width_mm: 50.0  # Tool width (~2 inches)
+    tool_length_mm: 100.0  # Tool length
+    grip_offset_mm: 30.0  # Where to grip tool
+    push_offset_mm: 15.0  # Positioning offset behind piece
+    push_speed_mm_min: 300  # Slow controlled push
+    pickup_speed_mm_min: 1000  # Speed for tool pickup/return
+
+# Storage Configuration
+storage:
+  # Default storage strategy
+  # Options: BY_COLOR, BY_TYPE, NEAREST, CHRONOLOGICAL
+  default_strategy: "BY_COLOR"
+
+  # Storage utilization alerts
+  alert_at_percent: 75  # Alert when storage is 75% full
+
+  # Auto-clear storage between games
+  auto_clear: true
+
+# AI-Driven Features (Future)
+ai:
+  # Automatic strategy selection based on game type
+  auto_strategy_selection: false
+
+  # Learn from user preferences
+  adaptive_learning: false
+
+# Multi-Board Coordination (Future)
+multi_board:
+  enabled: false
+
+  # Coordinate with other boards
+  share_storage: false
+
+  # Network settings
+  network:
+    enabled: false
+    port: 8080
+
+# Experimental Features
+experimental:
+  # Enable detailed logging for debugging
+  detailed_logging: false
+
+  # Simulation mode (no physical movement)
+  simulation_mode: false
+
+  # Performance profiling
+  profiling_enabled: false
+
+# Notes:
+# - edge_push: Disabled by default. Enable for boards without storage areas.
+#   Finds empty edge squares and pushes pieces off the board.
+#
+# - tool_pusher: Disabled by default. Requires physical pusher tool.
+#   Uses a curved pusher tool to scoop and push pieces cleanly off edges.
+#   Tool must be placed at tool_holder_square location.
+#
+# - For standard boards with storage areas (PERIMETER, TOP layouts),
+#   keep both edge_push and tool_pusher disabled. Smart storage will
+#   handle all captured pieces automatically.
+#
+# - If your board has NO storage layout, you can enable edge_push
+#   as a fallback when smart storage fills up.
+#
+# - tool_pusher is an ultra long-term feature requiring:
+#   1. 3D-printed or manufactured pusher tool
+#   2. Tool holder mounted on board
+#   3. Gripper calibration for tool pickup
+#   4. Push force calibration

@@ -1,0 +1,279 @@
+{
+  "$schema": "https://modelcontextprotocol.io/schema/config.json",
+  "version": "1.0.0",
+  "description": "Global MCP configuration for all Claude Code projects. Reference this file for consistent tooling across projects.",
+  "lastUpdated": "2025-10-10",
+
+  "mcpServers": {
+    "linear": {
+      "type": "http",
+      "url": "https://mcp.linear.app/mcp",
+      "description": "Project management & issue tracking. Use for: bug tracking, feature planning, issue history",
+      "priority": "medium",
+      "status": "active",
+      "usedIn": ["TacticsQuest"],
+      "documentation": "https://linear.app/docs/api"
+    },
+
+    "websearch": {
+      "type": "builtin",
+      "description": "Built-in web search (FREE). Use BEFORE implementation to find best practices, verify libraries, compare technologies",
+      "priority": "critical",
+      "status": "active",
+      "notes": "No API key needed - built into Claude Code. Use for all research needs.",
+      "documentation": "https://docs.claude.com/"
+    },
+
+    "context7": {
+      "type": "http",
+      "url": "https://context7.com/api/mcp",
+      "description": "Always up-to-date documentation for frameworks/libraries. Use for: getting current docs, best practices, API references",
+      "priority": "high",
+      "status": "recommended",
+      "auth": {
+        "type": "bearer",
+        "token": "${CONTEXT7_API_KEY}"
+      },
+      "notes": "Get API key from: https://context7.com/",
+      "documentation": "https://context7.com/docs"
+    },
+
+    "semgrep": {
+      "type": "executable",
+      "command": "semgrep",
+      "args": ["--config", "auto", "--quiet"],
+      "description": "Security scanning for vulnerabilities. Run BEFORE and AFTER every feature. MANDATORY for production",
+      "priority": "critical",
+      "status": "recommended",
+      "installation": "pip install semgrep OR brew install semgrep",
+      "documentation": "https://semgrep.dev/docs/",
+      "notes": "Free for open source. Pro features available. Run: semgrep --config=p/owasp-top-ten ."
+    },
+
+    "github": {
+      "type": "http",
+      "url": "https://api.github.com/mcp",
+      "description": "GitHub repo management. Use for: creating repos, PRs, searching code, managing issues",
+      "priority": "high",
+      "status": "recommended",
+      "auth": {
+        "type": "bearer",
+        "token": "${GITHUB_TOKEN}"
+      },
+      "notes": "Create token at: https://github.com/settings/tokens (needs: repo, workflow scopes)",
+      "documentation": "https://docs.github.com/en/rest"
+    },
+
+    "supabase": {
+      "type": "http",
+      "url": "https://api.supabase.com/mcp",
+      "description": "Supabase database management. Use for: querying data, managing auth, debugging, viewing schema",
+      "priority": "high",
+      "status": "recommended-if-using-supabase",
+      "auth": {
+        "type": "bearer",
+        "token": "${SUPABASE_SERVICE_ROLE_KEY}"
+      },
+      "notes": "Get from: Supabase project settings > API > service_role key. KEEP SECRET!",
+      "documentation": "https://supabase.com/docs/guides/api",
+      "projectSpecific": true,
+      "overrideInProject": "Set project-specific SUPABASE_SERVICE_ROLE_KEY in project .env"
+    },
+
+    "sentry": {
+      "type": "http",
+      "url": "https://sentry.io/api/mcp",
+      "description": "Error tracking & monitoring. Use for: debugging production issues, viewing error logs, performance monitoring",
+      "priority": "high",
+      "status": "recommended",
+      "auth": {
+        "type": "bearer",
+        "token": "${SENTRY_AUTH_TOKEN}"
+      },
+      "notes": "Create token at: https://sentry.io/settings/account/api/auth-tokens/",
+      "documentation": "https://docs.sentry.io/api/"
+    },
+
+    "playwright": {
+      "type": "executable",
+      "command": "npx",
+      "args": ["playwright", "test"],
+      "description": "Browser automation & E2E testing. Use for: UI testing, screenshots, visual regression, cross-browser testing",
+      "priority": "high",
+      "status": "recommended",
+      "installation": "npm install -D @playwright/test && npx playwright install",
+      "documentation": "https://playwright.dev/",
+      "notes": "Can take screenshots, grade UI against style guides (1-10 scale)"
+    },
+
+    "vibe-check": {
+      "type": "http",
+      "url": "https://api.vibecheck.dev/mcp",
+      "description": "Prevent over-engineering & tunnel vision. Use when: implementing complex features, adding dependencies, architectural decisions",
+      "priority": "medium",
+      "status": "recommended",
+      "auth": {
+        "type": "bearer",
+        "token": "${VIBE_CHECK_API_KEY}"
+      },
+      "commands": {
+        "VIBE_CHECK": "Challenge current assumptions",
+        "vibe_learn": "Capture mistakes & successes",
+        "update_constitution": "Set session rules",
+        "reset_constitution": "Clear session rules",
+        "check_constitution": "View active rules"
+      },
+      "notes": "Helps prevent: 'I need Redis, RabbitMQ, and Kubernetes for this simple form'",
+      "documentation": "https://vibecheck.dev/docs"
+    },
+
+    "pieces": {
+      "type": "http",
+      "url": "https://api.pieces.app/mcp",
+      "description": "Local memory & context management. Use for: remembering project patterns, storing preferences, issue context",
+      "priority": "low",
+      "status": "optional",
+      "auth": {
+        "type": "local"
+      },
+      "notes": "Locally processed for privacy. Integrates with current project",
+      "documentation": "https://docs.pieces.app/"
+    },
+
+    "noteit": {
+      "type": "http",
+      "url": "https://api.noteit.com/mcp",
+      "description": "Structured note-taking. Use for: documenting decisions, tracking TODOs, meeting notes",
+      "priority": "low",
+      "status": "optional",
+      "auth": {
+        "type": "bearer",
+        "token": "${NOTEIT_API_KEY}"
+      },
+      "documentation": "https://noteit.com/docs"
+    },
+
+    "openai": {
+      "type": "http",
+      "url": "https://api.openai.com/v1",
+      "description": "OpenAI API for GPT models. Already configured in TacticsQuest",
+      "priority": "medium",
+      "status": "active-in-tacticsquest",
+      "auth": {
+        "type": "bearer",
+        "token": "${OPENAI_API_KEY}"
+      },
+      "usedIn": ["TacticsQuest"],
+      "notes": "Current key found in TacticsQuest/.env",
+      "documentation": "https://platform.openai.com/docs/api-reference"
+    }
+  },
+
+  "environmentVariables": {
+    "description": "Set these in your system environment or in C:\\Users\\David\\Documents\\Claude DOCS\\.env",
+    "required": {
+      "SEMGREP_APP_TOKEN": {
+        "description": "Semgrep security scanning (optional, works without)",
+        "getFrom": "https://semgrep.dev/manage/settings/tokens",
+        "priority": "medium"
+      },
+      "GITHUB_TOKEN": {
+        "description": "GitHub personal access token (repo, workflow scopes)",
+        "getFrom": "https://github.com/settings/tokens",
+        "priority": "high"
+      }
+    },
+    "optional": {
+      "CONTEXT7_API_KEY": "Context7 documentation API",
+      "SENTRY_AUTH_TOKEN": "Sentry error tracking",
+      "VIBE_CHECK_API_KEY": "Vibe Check over-engineering prevention",
+      "NOTEIT_API_KEY": "Noteit note-taking"
+    },
+    "projectSpecific": {
+      "SUPABASE_SERVICE_ROLE_KEY": "Set per project (different for each Supabase project)",
+      "OPENAI_API_KEY": "Set per project if needed (already in TacticsQuest)"
+    }
+  },
+
+  "installation": {
+    "windows": {
+      "steps": [
+        "1. Install Semgrep: pip install semgrep",
+        "2. Install Playwright: npm install -g @playwright/test && npx playwright install",
+        "3. Set environment variables in PowerShell:",
+        "   [System.Environment]::SetEnvironmentVariable('PERPLEXITY_API_KEY', 'your-key', 'User')",
+        "   [System.Environment]::SetEnvironmentVariable('GITHUB_TOKEN', 'your-token', 'User')",
+        "4. Restart terminal to load new environment variables",
+        "5. Verify: echo $env:PERPLEXITY_API_KEY"
+      ]
+    },
+    "global": {
+      "description": "To use this config globally for all projects:",
+      "method1": "Copy to ~/.claude/mcp-config.json (if Claude Code supports global config)",
+      "method2": "Reference from each project's .mcp.json using 'extends' (if supported)",
+      "method3": "Keep in Claude DOCS and manually reference when needed"
+    }
+  },
+
+  "usage": {
+    "perProject": [
+      "1. Copy project-specific MCPs to project/.mcp.json",
+      "2. Set project-specific env vars in project/.env.local",
+      "3. Reference this file for available global MCPs"
+    ],
+    "beforeFeature": [
+      "1. Use Perplexity MCP to research best approach",
+      "2. Use Context7 MCP to get up-to-date documentation",
+      "3. Implement feature",
+      "4. Use Semgrep MCP to scan for security issues"
+    ],
+    "debugging": [
+      "1. Use Sentry MCP to check production errors",
+      "2. Use Linear MCP to check similar past issues",
+      "3. Use GitHub MCP to search for related code patterns"
+    ]
+  },
+
+  "priorityInstallOrder": [
+    {
+      "order": 1,
+      "mcp": "semgrep",
+      "reason": "Security is mandatory",
+      "install": "pip install semgrep"
+    },
+    {
+      "order": 2,
+      "mcp": "websearch",
+      "reason": "Research before coding saves time (built-in, free)",
+      "install": "No installation needed - built into Claude Code"
+    },
+    {
+      "order": 3,
+      "mcp": "github",
+      "reason": "Repo management for all projects",
+      "install": "Create token at github.com/settings/tokens"
+    },
+    {
+      "order": 4,
+      "mcp": "playwright",
+      "reason": "UI testing is essential",
+      "install": "npm install -D @playwright/test"
+    },
+    {
+      "order": 5,
+      "mcp": "sentry",
+      "reason": "Production error tracking",
+      "install": "Get auth token from sentry.io"
+    }
+  ],
+
+  "notes": [
+    "This file serves as a REFERENCE for all projects",
+    "DO NOT commit API keys to git - use environment variables",
+    "Update this file when discovering new useful MCPs",
+    "See 08_MCP_TOOLS_REGISTRY.md for detailed MCP documentation",
+    "Project-specific configs should extend/override this",
+    "TacticsQuest already uses: Linear, OpenAI",
+    "Recommended to install: Semgrep (security), Perplexity (research), Playwright (testing)"
+  ]
+}
