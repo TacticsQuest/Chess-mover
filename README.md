@@ -278,15 +278,16 @@ See [ADVANCED_FEATURES_GUIDE.md](ADVANCED_FEATURES_GUIDE.md) for complete docume
 See [RASPBERRY_PI_AI_CAMERA_INTEGRATION.md](RASPBERRY_PI_AI_CAMERA_INTEGRATION.md) for complete guide.
 
 **Can start now** (before hardware arrives):
-- ✅ **Use online datasets** - Download from Roboflow/Kaggle (instant!)
-- ✅ **Record videos** - 30 seconds per piece = 1,100 images (15 min total)
-- ✅ **Train models** - Desktop GPU training (1-2 hours)
+- ✅ **Record videos of YOUR chess pieces** - 30 seconds per piece = 1,100 images (15 min total)
+- ✅ **Train model on desktop GPU** - 1-2 hours on RTX 4080 SUPER
+- ✅ **98-99% accuracy** - Specialized for YOUR specific pieces
 - ✅ **Test with webcam** - Any USB camera works for development
 - ✅ **Mock mode** - Full software development without hardware
 
-**Quick Start Guides**:
-- [VISION_QUICKSTART.md](VISION_QUICKSTART.md) - Get started in 30 minutes
-- [VISION_TRAINING_STRATEGY.md](VISION_TRAINING_STRATEGY.md) - Training recommendations
+**Recommended Training Guide**:
+- [VISION_TRAINING_YOUR_PIECES.md](VISION_TRAINING_YOUR_PIECES.md) - **⭐ START HERE** - Train on YOUR pieces (recommended!)
+- [VISION_QUICKSTART.md](VISION_QUICKSTART.md) - Alternative approaches (online datasets, hybrid)
+- [VISION_TRAINING_STRATEGY.md](VISION_TRAINING_STRATEGY.md) - Detailed training strategy
 
 ---
 
