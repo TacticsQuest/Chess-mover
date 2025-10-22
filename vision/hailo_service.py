@@ -107,19 +107,36 @@ class HailoVisionService:
 
         Returns:
             RGB image as numpy array
-        """
-        if self.mock_mode:
-            # Return blank image for testing
-            return np.zeros((1080, 1920, 3), dtype=np.uint8)
 
-        if hasattr(self, 'camera') and hasattr(self.camera, 'capture_array'):
-            # Pi Camera
-            return self.camera.capture_array()
-        else:
-            # OpenCV camera
-            ret, frame = self.camera.read()
-            if ret:
+        Raises:
+            RuntimeError: If camera capture fails
+        """
+        try:
+            if self.mock_mode:
+                # Return blank image for testing
+                return np.zeros((1080, 1920, 3), dtype=np.uint8)
+
+            if hasattr(self, 'camera') and hasattr(self.camera, 'capture_array'):
+                # Pi Camera
+                try:
+                    return self.camera.capture_array()
+                except Exception as e:
+                    print(f"[VISION] Error capturing from Pi Camera: {e}")
+                    raise RuntimeError(f"Pi Camera capture failed: {e}")
+            else:
+                # OpenCV camera
+                if not hasattr(self, 'camera') or self.camera is None:
+                    raise RuntimeError("Camera not initialized")
+
+                ret, frame = self.camera.read()
+                if not ret or frame is None:
+                    raise RuntimeError("Failed to read frame from camera")
+
                 return cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+        except Exception as e:
+            print(f"[VISION] Frame capture error: {e}")
+            # Return blank frame as fallback to prevent crashes
             return np.zeros((1080, 1920, 3), dtype=np.uint8)
 
     def detect_board(self) -> Dict:
@@ -252,29 +269,57 @@ class HailoVisionService:
 
         Returns:
             BoardState object with all detected pieces
+
+        Raises:
+            RuntimeError: If board state capture fails critically
         """
         import time
 
-        # Detect board
-        board_info = self.detect_board()
+        try:
+            # Detect board
+            board_info = self.detect_board()
 
-        # Capture and warp frame
-        frame = self.capture_frame()
-        warped = cv2.warpPerspective(
-            frame,
-            board_info['transform_matrix'],
-            (640, 640)
-        )
+            if board_info['confidence'] < 0.5:
+                print(f"[VISION] Warning: Low board detection confidence ({board_info['confidence']:.2f})")
 
-        # Detect all pieces
-        pieces = self.detect_all_pieces(warped)
+            # Capture and warp frame
+            frame = self.capture_frame()
 
-        return BoardState(
-            pieces=pieces,
-            board_corners=board_info['corners'],
-            confidence=board_info['confidence'],
-            timestamp=time.time()
-        )
+            try:
+                warped = cv2.warpPerspective(
+                    frame,
+                    board_info['transform_matrix'],
+                    (640, 640)
+                )
+            except Exception as e:
+                print(f"[VISION] Error warping image: {e}")
+                # Use original frame as fallback
+                warped = cv2.resize(frame, (640, 640))
+
+            # Detect all pieces
+            try:
+                pieces = self.detect_all_pieces(warped)
+            except Exception as e:
+                print(f"[VISION] Error detecting pieces: {e}")
+                pieces = {}  # Empty board state
+
+            return BoardState(
+                pieces=pieces,
+                board_corners=board_info['corners'],
+                confidence=board_info['confidence'],
+                timestamp=time.time()
+            )
+
+        except Exception as e:
+            print(f"[VISION] Critical error capturing board state: {e}")
+            # Return empty board state as fallback
+            import time
+            return BoardState(
+                pieces={},
+                board_corners=[(0, 0), (640, 0), (640, 640), (0, 640)],
+                confidence=0.0,
+                timestamp=time.time()
+            )
 
     def detect_all_pieces(self, board_image: np.ndarray) -> Dict[str, DetectedPiece]:
         """
