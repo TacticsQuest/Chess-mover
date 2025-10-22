@@ -278,10 +278,15 @@ See [ADVANCED_FEATURES_GUIDE.md](ADVANCED_FEATURES_GUIDE.md) for complete docume
 See [RASPBERRY_PI_AI_CAMERA_INTEGRATION.md](RASPBERRY_PI_AI_CAMERA_INTEGRATION.md) for complete guide.
 
 **Can start now** (before hardware arrives):
-- Model training on desktop GPU
-- Dataset collection planning
-- Software development with mock mode
-- Unit test creation
+- ✅ **Use online datasets** - Download from Roboflow/Kaggle (instant!)
+- ✅ **Record videos** - 30 seconds per piece = 1,100 images (15 min total)
+- ✅ **Train models** - Desktop GPU training (1-2 hours)
+- ✅ **Test with webcam** - Any USB camera works for development
+- ✅ **Mock mode** - Full software development without hardware
+
+**Quick Start Guides**:
+- [VISION_QUICKSTART.md](VISION_QUICKSTART.md) - Get started in 30 minutes
+- [VISION_TRAINING_STRATEGY.md](VISION_TRAINING_STRATEGY.md) - Training recommendations
 
 ---
 

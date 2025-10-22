@@ -61,6 +61,13 @@ stockfish/
 *.exe
 imager-*.exe
 
+# Vision datasets (can be very large)
+datasets/
+models/*.hef
+models/*.onnx
+models/*.pt
+*.h5
+
 # Temporary files
 *.tmp
 *.bak
