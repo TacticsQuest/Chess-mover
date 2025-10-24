@@ -56,7 +56,11 @@ def load_piece_svg(piece_code: str, size: int) -> Optional[ImageTk.PhotoImage]:
 
         # Scale to requested size using high-quality resampling
         if img.size != (size, size):
-            img = img.resize((size, size), Image.Resampling.LANCZOS)
+            # Use Image.LANCZOS for older Pillow versions (Pi compatibility)
+            try:
+                img = img.resize((size, size), Image.Resampling.LANCZOS)
+            except AttributeError:
+                img = img.resize((size, size), Image.LANCZOS)
 
         # Convert to PhotoImage
         photo = ImageTk.PhotoImage(img)
@@ -588,6 +592,44 @@ class EditorWindow(tk.Frame):
         grip_close_btn.pack(side=tk.LEFT, padx=1)
         self._create_tooltip(grip_close_btn, "Close gripper")
 
+        # Move Done section (for human move detection)
+        move_done_section = tk.Frame(machine_panel, bg=self.theme['panel_bg'])
+        move_done_section.pack(fill=tk.X, padx=10, pady=(15, 10))
+
+        tk.Label(
+            move_done_section,
+            text="Move Detection",
+            font=("Segoe UI", 9, "bold"),
+            bg=self.theme['panel_bg'],
+            fg=self.theme['fg']
+        ).pack(anchor="w", pady=(0, 5))
+
+        self.move_done_btn = tk.Button(
+            move_done_section,
+            text="✓ Move Done",
+            font=("Segoe UI", 10, "bold"),
+            bg='#27ae60',
+            fg="white",
+            relief=tk.FLAT,
+            cursor="hand2",
+            command=self._handle_move_done,
+            state=tk.NORMAL
+        )
+        self.move_done_btn.pack(fill=tk.X, pady=2)
+        self._create_tooltip(self.move_done_btn, "Click after making your move on the board")
+
+        # Status label for move detection
+        self.move_detect_status = tk.Label(
+            move_done_section,
+            text="",
+            font=("Segoe UI", 8),
+            bg=self.theme['panel_bg'],
+            fg=self.theme['text_secondary'],
+            wraplength=180,
+            justify=tk.LEFT
+        )
+        self.move_detect_status.pack(anchor="w", pady=(5, 0))
+
         # Right panel - Settings and Sync Controls
         right_panel = tk.Frame(container, bg=self.theme['panel_bg'], width=280)
         right_panel.grid(row=0, column=2, sticky="ns")
@@ -813,7 +855,10 @@ class EditorWindow(tk.Frame):
             if os.path.exists(logo_path):
                 logo_img = Image.open(logo_path).convert("RGBA")
                 # Resize to small (40x40 pixels)
-                logo_img = logo_img.resize((40, 40), Image.Resampling.LANCZOS)
+                try:
+                    logo_img = logo_img.resize((40, 40), Image.Resampling.LANCZOS)
+                except AttributeError:
+                    logo_img = logo_img.resize((40, 40), Image.LANCZOS)
                 logo_photo = ImageTk.PhotoImage(logo_img)
                 # Keep reference to prevent garbage collection
                 self.logo_image = logo_photo
@@ -1499,3 +1544,150 @@ class EditorWindow(tk.Frame):
         self._redraw_board()
         self._update_sync_status()
         self._update_fen_display()
+
+    def _handle_move_done(self):
+        """Handle 'Move Done' button press - detect and verify human move using camera."""
+        try:
+            # Import vision service
+            from vision.hailo_service import HailoVisionService
+
+            # Update button state - disable and show processing
+            self.move_done_btn.config(
+                text="⏳ Detecting...",
+                state=tk.DISABLED,
+                bg='#95a5a6'
+            )
+            self.move_detect_status.config(
+                text="Capturing board state...",
+                fg='#f39c12'
+            )
+            self.update()  # Force UI update
+
+            # Initialize vision service (mock mode if no hardware)
+            vision = HailoVisionService(mock_mode=True)
+
+            # Capture board state
+            board_state = vision.capture_board_state()
+
+            # Update status
+            self.move_detect_status.config(
+                text=f"Confidence: {board_state.confidence:.0%}\nAnalyzing move..."
+            )
+            self.update()
+
+            # Get expected position from virtual board
+            expected_state = {}
+            files = self.board_cfg.files
+            ranks = self.board_cfg.ranks
+
+            for file_idx in range(files):
+                for rank_idx in range(ranks):
+                    square = f"{chr(ord('a') + file_idx)}{rank_idx + 1}"
+                    piece = self.board_state.get_piece_virtual(square)
+                    if piece:
+                        piece_name = f"{piece.color.value}_{piece.type.value}"
+                        expected_state[square] = piece_name
+
+            # Compare with detected position
+            differences = vision.get_position_differences(expected_state)
+
+            if not differences:
+                # No differences - board matches expected position
+                self.move_detect_status.config(
+                    text="✓ No move detected\nBoard matches expected position",
+                    fg='#27ae60'
+                )
+                self.move_done_btn.config(
+                    text="✓ Move Done",
+                    state=tk.NORMAL,
+                    bg='#27ae60'
+                )
+                vision.close()
+                return
+
+            # Differences detected - show summary
+            summary = f"Detected {len(differences)} change(s):\n"
+            for diff in differences[:3]:  # Show first 3
+                summary += f"• {diff}\n"
+            if len(differences) > 3:
+                summary += f"... and {len(differences) - 3} more"
+
+            self.move_detect_status.config(
+                text=summary,
+                fg='#3498db'
+            )
+
+            # Ask user to confirm
+            confirm = messagebox.askyesno(
+                "Move Detected",
+                f"Detected {len(differences)} change(s) on the board:\n\n" +
+                "\n".join(differences[:5]) +
+                (f"\n... and {len(differences) - 5} more" if len(differences) > 5 else "") +
+                "\n\nUpdate virtual board to match?",
+                icon='question'
+            )
+
+            if confirm:
+                # Update virtual board based on detected position
+                for square, detected_piece in board_state.pieces.items():
+                    from logic.board_state import Piece, PieceType, PieceColor
+                    piece = Piece(
+                        type=PieceType(detected_piece.type.value),
+                        color=PieceColor(detected_piece.color.value)
+                    )
+                    self.board_state.set_piece_virtual(square, piece)
+
+                # Clear squares that should be empty
+                for file_idx in range(files):
+                    for rank_idx in range(ranks):
+                        square = f"{chr(ord('a') + file_idx)}{rank_idx + 1}"
+                        if square not in board_state.pieces:
+                            self.board_state.set_piece_virtual(square, None)
+
+                # Sync physical to virtual
+                self.board_state.sync_physical_to_virtual()
+
+                # Redraw
+                self._redraw_board()
+                self._update_sync_status()
+                self._update_fen_display()
+
+                self.move_detect_status.config(
+                    text="✓ Move confirmed and applied",
+                    fg='#27ae60'
+                )
+            else:
+                self.move_detect_status.config(
+                    text="Move cancelled",
+                    fg='#95a5a6'
+                )
+
+            # Cleanup
+            vision.close()
+
+        except ImportError as e:
+            messagebox.showerror(
+                "Vision System Not Available",
+                f"Camera vision system is not installed or configured.\n\n{e}\n\n"
+                "Install required dependencies:\npip install opencv-python"
+            )
+            self.move_detect_status.config(
+                text="✗ Vision system unavailable",
+                fg='#e74c3c'
+            )
+        except Exception as e:
+            messagebox.showerror(
+                "Move Detection Failed",
+                f"Failed to detect move:\n\n{e}"
+            )
+            self.move_detect_status.config(
+                text=f"✗ Error: {str(e)[:30]}...",
+                fg='#e74c3c'
+            )
+        finally:
+            # Restore button state
+            self.move_done_btn.config(
+                text="✓ Move Done",
+                state=tk.NORMAL,
+                bg='#27ae60'
+            )
