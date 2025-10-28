@@ -307,3 +307,33 @@ class Settings:
             return profile.get('pieces', DEFAULTS['profiles']['saved'][0]['pieces'])
 
         return DEFAULTS['profiles']['saved'][0]['pieces']
+
+    def get_ui_settings(self) -> Dict[str, Any]:
+        """
+        Get UI settings.
+
+        Returns:
+            UI settings dict with board_theme
+        """
+        return self.data.get('ui', {'board_theme': 'Classic Brown'})
+
+    def set_board_theme(self, theme_name: str) -> None:
+        """
+        Set the board theme.
+
+        Args:
+            theme_name: Name of the theme to set
+        """
+        if 'ui' not in self.data:
+            self.data['ui'] = {}
+        self.data['ui']['board_theme'] = theme_name
+
+    def get_board_theme(self) -> str:
+        """
+        Get the current board theme name.
+
+        Returns:
+            Board theme name (defaults to 'Classic Brown')
+        """
+        ui_settings = self.get_ui_settings()
+        return ui_settings.get('board_theme', 'Classic Brown')

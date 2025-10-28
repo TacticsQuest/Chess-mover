@@ -9,6 +9,8 @@ board:
   origin_x_mm: 0.0
   origin_y_mm: 0.0
   feedrate_mm_min: 2000
+ui:
+  board_theme: Classic Brown
 safety:
   max_speed_mm_min: 5000
   min_speed_mm_min: 100

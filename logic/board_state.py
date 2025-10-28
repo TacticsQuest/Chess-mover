@@ -56,9 +56,11 @@ class BoardState:
         virtual_position: Dict mapping square (e.g. 'e4') to Piece (software state)
         physical_position: Dict mapping square to Piece (actual hardware state)
         synced: Whether virtual and physical states match
+        board_cfg: Optional board configuration for play area offset
     """
     virtual_position: Dict[str, Piece] = field(default_factory=dict)
     physical_position: Dict[str, Piece] = field(default_factory=dict)
+    board_cfg: Optional['BoardConfig'] = None
 
     def is_synced(self) -> bool:
         """Check if virtual and physical positions match."""
@@ -129,11 +131,22 @@ class BoardState:
         """
         Load position from FEN string.
 
+        FEN notation always refers to the playing area (a1-h8).
+        If board_cfg is set with a play_area, pieces are placed in the playing area,
+        otherwise they're placed starting from a1.
+
         Args:
             fen: FEN string (only position part, before first space)
             target: 'virtual' or 'physical' - which position to update
         """
         position = {}
+
+        # Get playing area offset (0, 0) if no board_cfg or no play_area
+        file_offset = 0
+        rank_offset = 0
+        if self.board_cfg and self.board_cfg.play_area:
+            file_offset = self.board_cfg.play_area.min_file
+            rank_offset = self.board_cfg.play_area.min_rank
 
         # Parse FEN (e.g., "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR")
         ranks = fen.split(' ')[0].split('/')
@@ -145,8 +158,12 @@ class BoardState:
                     # Empty squares
                     file_idx += int(char)
                 else:
-                    # Piece
-                    square = f"{chr(ord('a') + file_idx)}{8 - rank_idx}"
+                    # Piece - FEN rank 8 is at rank_idx=0, FEN rank 1 is at rank_idx=7
+                    # FEN file a is at file_idx=0, FEN file h is at file_idx=7
+                    # Apply offset to place in playing area
+                    physical_file = file_idx + file_offset
+                    physical_rank = (7 - rank_idx) + rank_offset
+                    square = f"{chr(ord('a') + physical_file)}{physical_rank + 1}"
                     piece = Piece.from_fen(char)
                     position[square] = piece
                     file_idx += 1

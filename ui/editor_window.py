@@ -26,6 +26,20 @@ PIECE_SYMBOLS = {
     'bK': '♚', 'bQ': '♛', 'bR': '♜', 'bB': '♝', 'bN': '♞', 'bP': '♟'
 }
 
+# Board color themes (light, dark)
+BOARD_THEMES = {
+    'Classic Brown': ('#f0d9b5', '#b58863'),      # Traditional brown
+    'Green': ('#ebecd0', '#779556'),              # Classic green
+    'Blue': ('#dee3e6', '#8ca2ad'),               # Light blue/gray
+    'Gray': ('#e8e8e8', '#7d7d7d'),               # Neutral gray
+    'Black & White': ('#ffffff', '#000000'),       # High contrast
+    'Wood': ('#f4dec8', '#8b5a2b'),               # Wooden board
+    'Ice': ('#f0f8ff', '#b0d4f1'),                # Ice blue
+    'Purple': ('#e6d5ff', '#8b6ba8'),             # Purple
+    'Red': ('#ffcccc', '#cc6666'),                # Red tones
+    'Newspaper': ('#f5f5dc', '#8b8378'),          # Beige/taupe
+}
+
 # Global cache for piece images
 _piece_image_cache: Dict[tuple, ImageTk.PhotoImage] = {}
 
@@ -52,6 +66,7 @@ def load_piece_svg(piece_code: str, size: int) -> Optional[ImageTk.PhotoImage]:
 
     try:
         # Load PNG with PIL (preserves alpha channel)
+        # TacticsQuest PNGs already have proper transparency - no processing needed
         img = Image.open(png_path).convert("RGBA")
 
         # Scale to requested size using high-quality resampling
@@ -131,16 +146,35 @@ class EditorWindow(tk.Frame):
                  on_move_to_square: Optional[Callable] = None,
                  on_calibrate: Optional[Callable] = None,
                  on_jog: Optional[Callable] = None,
-                 on_home: Optional[Callable] = None):
+                 on_home: Optional[Callable] = None,
+                 settings_obj=None,
+                 compact_mode: Optional[bool] = None,
+                 profile_var=None,
+                 on_profile_change: Optional[Callable] = None):
         super().__init__(parent)
 
         self.board_state = board_state
         self.board_cfg = board_cfg
         self.gantry = gantry
         self.servos = servos
+        self.settings_obj = settings_obj
+        self.profile_var = profile_var
+        self.on_profile_change = on_profile_change
         self.selected_piece = None  # Currently selected piece to place
         self.board_orientation = 'white'  # 'white' or 'black'
         self.highlight_occupied_storage = False  # Toggle for storage square occupied highlighting
+
+        # Use passed compact_mode if provided, otherwise auto-detect
+        if compact_mode is not None:
+            self.compact_mode = compact_mode
+            print(f"[EditorWindow] Compact mode set by parent: {self.compact_mode}")
+        else:
+            # Auto-detect compact mode based on screen resolution
+            # Compact mode for 7" touchscreens (1024x600) and similar small displays
+            screen_width = parent.winfo_screenwidth()
+            screen_height = parent.winfo_screenheight()
+            self.compact_mode = (screen_width <= 1024 and screen_height <= 600)
+            print(f"[EditorWindow] Screen: {screen_width}x{screen_height}, Compact mode: {self.compact_mode}")
 
         # Get machine workspace dimensions from gantry
         self.workspace_width_mm = gantry.safety_limits.x_max - gantry.safety_limits.x_min
@@ -162,6 +196,14 @@ class EditorWindow(tk.Frame):
         self.on_jog = on_jog
         self.on_home = on_home
 
+        # Load board theme from settings
+        board_theme_name = 'Classic Brown'  # Default
+        if settings_obj:
+            board_theme_name = settings_obj.get_board_theme()
+
+        # Get theme colors from BOARD_THEMES
+        board_colors = BOARD_THEMES.get(board_theme_name, BOARD_THEMES['Classic Brown'])
+
         # Theme colors
         self.theme = {
             'bg': '#1e1e1e',
@@ -172,14 +214,19 @@ class EditorWindow(tk.Frame):
             'success': '#27ae60',
             'warning': '#f39c12',
             'danger': '#e74c3c',
-            'board_light': '#ebecd0',
-            'board_dark': '#779556',
+            'board_light': board_colors[0],
+            'board_dark': board_colors[1],
             'fg': '#e0e0e0',
             'text_secondary': '#95a5a6',
         }
 
         self.configure(bg=self.theme['bg'])
-        self._build_ui()
+
+        # Build UI based on mode
+        if self.compact_mode:
+            self._build_ui_compact()
+        else:
+            self._build_ui()
 
     def _build_ui(self):
         """Build the unified UI with editor and machine controls."""
@@ -194,91 +241,63 @@ class EditorWindow(tk.Frame):
         container.grid_columnconfigure(1, weight=1)  # Center panel - expandable
         container.grid_columnconfigure(2, weight=0)  # Right panel - fixed width
 
-        # Left panel - Piece palette
-        left_panel = tk.Frame(container, bg=self.theme['panel_bg'], width=150)
+        # Left panel - Piece palette (TacticsQuest Style)
+        left_panel = tk.Frame(container, bg=self.theme['panel_bg'], width=180)
         left_panel.grid(row=0, column=0, sticky="ns", padx=(0, 10))
         left_panel.grid_propagate(False)
 
         tk.Label(
             left_panel,
-            text="Piece Palette",
+            text="🎨 Piece Palette",
             font=("Segoe UI", 11, "bold"),
             bg=self.theme['panel_bg'],
             fg=self.theme['accent']
         ).pack(pady=10)
 
-        # White pieces - 2 column grid layout with dark background for contrast
-        tk.Label(
-            left_panel,
-            text="White Pieces",
-            font=("Segoe UI", 9),
-            bg=self.theme['panel_bg'],
-            fg=self.theme['text_secondary']
-        ).pack(pady=(10, 5))
+        # All pieces in single 6x2 grid (TacticsQuest style)
+        pieces_container = tk.Frame(left_panel, bg=self.theme['panel_bg'])
+        pieces_container.pack(padx=5, pady=(0, 10), fill=tk.X)
 
-        # Dark container for white pieces (for contrast)
-        white_container = tk.Frame(left_panel, bg="#0e0e10", relief=tk.FLAT, bd=1)
-        white_container.pack(padx=5, pady=(0, 10), fill=tk.X)
+        pieces_grid = tk.Frame(pieces_container, bg=self.theme['panel_bg'])
+        pieces_grid.pack(padx=3, pady=3)
 
-        white_pieces_frame = tk.Frame(white_container, bg="#0e0e10")
-        white_pieces_frame.pack(padx=8, pady=8)
+        # Configure 2 columns for desktop (narrower panel)
+        for col in range(2):
+            pieces_grid.grid_columnconfigure(col, weight=1, uniform="piece")
 
-        white_pieces = [
-            ('wK', '♔'), ('wQ', '♕'), ('wR', '♖'),
-            ('wB', '♗'), ('wN', '♘'), ('wP', '♙')
+        # All 12 pieces in 2x6 grid: 2 columns, 6 rows (white pieces left, black pieces right)
+        all_pieces = [
+            ('wK', '♔'), ('bK', '♚'),
+            ('wQ', '♕'), ('bQ', '♛'),
+            ('wR', '♖'), ('bR', '♜'),
+            ('wB', '♗'), ('bB', '♝'),
+            ('wN', '♘'), ('bN', '♞'),
+            ('wP', '♙'), ('bP', '♟')
         ]
 
-        for idx, (piece_code, symbol) in enumerate(white_pieces):
+        for idx, (piece_code, symbol) in enumerate(all_pieces):
             row = idx // 2
             col = idx % 2
-            self._create_piece_button_grid(white_pieces_frame, piece_code, symbol, row, col)
+            self._create_piece_button_desktop(pieces_grid, piece_code, symbol, row, col)
 
-        # Black pieces - 2 column grid layout with light background for contrast
-        tk.Label(
-            left_panel,
-            text="Black Pieces",
-            font=("Segoe UI", 9),
-            bg=self.theme['panel_bg'],
-            fg=self.theme['text_secondary']
-        ).pack(pady=(10, 5))
-
-        # Light container for black pieces (for contrast)
-        black_container = tk.Frame(left_panel, bg="#f3f3f3", relief=tk.FLAT, bd=1)
-        black_container.pack(padx=5, pady=(0, 10), fill=tk.X)
-
-        black_pieces_frame = tk.Frame(black_container, bg="#f3f3f3")
-        black_pieces_frame.pack(padx=8, pady=8)
-
-        black_pieces = [
-            ('bK', '♚'), ('bQ', '♛'), ('bR', '♜'),
-            ('bB', '♝'), ('bN', '♞'), ('bP', '♟')
-        ]
-
-        for idx, (piece_code, symbol) in enumerate(black_pieces):
-            row = idx // 2
-            col = idx % 2
-            self._create_piece_button_grid(black_pieces_frame, piece_code, symbol, row, col)
-
-        # Delete button - full width
-        tk.Label(
-            left_panel,
-            text="Tools",
-            font=("Segoe UI", 9),
-            bg=self.theme['panel_bg'],
-            fg=self.theme['text_secondary']
-        ).pack(pady=(20, 5))
-
+        # Delete button - full width (TacticsQuest style)
         delete_btn = tk.Button(
             left_panel,
             text="🗑️ Delete",
             font=("Segoe UI", 9),
-            bg=self.theme['danger'],
+            bg="#3a0a0a",  # Dark red background
             fg="white",
+            activebackground="#4a1010",
             relief=tk.FLAT,
+            height=2,
+            bd=2,
+            highlightthickness=2,
+            highlightbackground="#666666",
+            highlightcolor="#cc0000",
             cursor="hand2",
             command=lambda: self._select_piece('delete')
         )
-        delete_btn.pack(pady=5, padx=10, fill=tk.X)
+        delete_btn.pack(pady=10, padx=10, fill=tk.X)
 
         # Center panel - Chess board on left, machine controls on right
         center_panel = tk.Frame(container, bg=self.theme['bg'])
@@ -879,6 +898,518 @@ class EditorWindow(tk.Frame):
         self._redraw_board()
         self._update_fen_display()
 
+    def _build_ui_compact(self):
+        """Build compact UI optimized for 7\" touchscreens (1024x600)."""
+
+        # Main container with no padding for maximum space
+        container = tk.Frame(self, bg=self.theme['bg'])
+        container.pack(fill=tk.BOTH, expand=True, padx=0, pady=0)
+
+        # Two-column layout: Board (left) + Controls (right)
+        container.grid_rowconfigure(0, weight=1)
+        container.grid_columnconfigure(0, weight=1)  # Board - expandable
+        container.grid_columnconfigure(1, weight=0)  # Controls - fixed
+
+        # === LEFT: Board ===
+        board_container = tk.Frame(container, bg=self.theme['canvas_bg'])
+        board_container.grid(row=0, column=0, sticky="nsew", padx=0, pady=0)
+
+        # Board canvas - expand to fill available space
+        print(f"[EditorWindow] Board will expand to fill space (compact_mode={self.compact_mode})")
+        self.canvas = tk.Canvas(
+            board_container,
+            bg=self.theme['canvas_bg'],
+            highlightthickness=0
+        )
+        self.canvas.pack(fill=tk.BOTH, expand=True, padx=0, pady=0)
+        self.canvas.bind("<Button-1>", self._on_square_click)
+        self.canvas.bind("<Configure>", lambda e: self._redraw_board())
+
+        # === RIGHT: Collapsible Control Panel ===
+        # Narrower panel for 7" touchscreen, standard width for desktop
+        panel_width = 272 if self.compact_mode else 420
+        right_panel = tk.Frame(container, bg=self.theme['panel_bg'], width=panel_width)
+        right_panel.grid(row=0, column=1, sticky="nsew")
+        right_panel.grid_propagate(False)
+
+        # Create scrollable frame for controls
+        canvas_scroll = tk.Canvas(right_panel, bg=self.theme['panel_bg'], highlightthickness=0)
+        scrollbar = tk.Scrollbar(right_panel, orient="vertical", command=canvas_scroll.yview)
+        scrollable_frame = tk.Frame(canvas_scroll, bg=self.theme['panel_bg'])
+
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas_scroll.configure(scrollregion=canvas_scroll.bbox("all"))
+        )
+
+        canvas_scroll.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas_scroll.configure(yscrollcommand=scrollbar.set)
+
+        canvas_scroll.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        # === PROFILE SELECTOR (Touchscreen mode only) ===
+        if self.compact_mode and self.profile_var is not None:
+            profile_frame = tk.Frame(scrollable_frame, bg=self.theme['panel_bg'])
+            profile_frame.pack(fill=tk.X, padx=8, pady=(8, 12))
+
+            tk.Label(
+                profile_frame,
+                text="Profile:",
+                font=("Segoe UI", 10, "bold"),
+                bg=self.theme['panel_bg'],
+                fg=self.theme['fg']
+            ).pack(side=tk.LEFT, padx=(0, 8))
+
+            # Import ttk for Combobox
+            from tkinter import ttk
+
+            self.profile_combo = ttk.Combobox(
+                profile_frame,
+                textvariable=self.profile_var,
+                values=self.settings_obj.get_profile_names() if self.settings_obj else [],
+                state='readonly',
+                width=18,
+                font=("Segoe UI", 10)
+            )
+            self.profile_combo.pack(side=tk.LEFT, fill=tk.X, expand=True)
+            if self.on_profile_change:
+                self.profile_combo.bind('<<ComboboxSelected>>', lambda e: self.on_profile_change())
+
+        # === PIECE PALETTE (TacticsQuest Style: 6x2 Grid) ===
+        pieces_section = self._create_collapsible_section(scrollable_frame, "🎨 Tap to Select Piece", True)
+
+        # All pieces in single 6-column grid (white on top, black on bottom)
+        pieces_grid = tk.Frame(pieces_section, bg=self.theme['panel_bg'])
+        pieces_grid.pack(fill=tk.X, padx=3, pady=3)
+
+        # Configure 6 columns of equal width
+        for col in range(6):
+            pieces_grid.grid_columnconfigure(col, weight=1, uniform="piece")
+
+        # All 12 pieces in 6x2 grid: white pieces row 1, black pieces row 2
+        all_pieces = [
+            ('wK', '♔'), ('wQ', '♕'), ('wR', '♖'), ('wB', '♗'), ('wN', '♘'), ('wP', '♙'),
+            ('bK', '♚'), ('bQ', '♛'), ('bR', '♜'), ('bB', '♝'), ('bN', '♞'), ('bP', '♟')
+        ]
+
+        for idx, (piece_code, symbol) in enumerate(all_pieces):
+            row = idx // 6
+            col = idx % 6
+            self._create_piece_button_compact(pieces_grid, piece_code, symbol, row, col)
+
+        # Delete button (full width, styled like TacticsQuest)
+        delete_btn = tk.Button(
+            pieces_section,
+            text="🗑️ Delete Mode (Tap Squares)",
+            font=("Segoe UI", 9),
+            bg="#3a0a0a",  # Dark red background
+            fg="white",
+            activebackground="#4a1010",
+            relief=tk.FLAT,
+            height=2,
+            bd=2,
+            highlightthickness=2,
+            highlightbackground="#666666",
+            highlightcolor="#cc0000",
+            command=lambda: self._select_piece('delete')
+        )
+        delete_btn.pack(fill=tk.X, padx=3, pady=(0, 3))
+
+        # === BOARD SETUP ===
+        setup_section = self._create_collapsible_section(scrollable_frame, "⚙️ Board Setup", True)
+
+        # Quick actions in 2x2 grid
+        setup_grid = tk.Frame(setup_section, bg=self.theme['panel_bg'])
+        setup_grid.pack(fill=tk.X, padx=4, pady=4)
+
+        setup_grid.grid_columnconfigure(0, weight=1)
+        setup_grid.grid_columnconfigure(1, weight=1)
+
+        start_btn = tk.Button(
+            setup_grid,
+            text="Start Pos",
+            font=("Segoe UI", 9),
+            bg=self.theme['input_bg'],
+            fg=self.theme['fg'],
+            relief=tk.FLAT,
+            height=2,
+            command=self._set_starting_position
+        )
+        start_btn.grid(row=0, column=0, padx=2, pady=2, sticky="ew")
+
+        clear_btn = tk.Button(
+            setup_grid,
+            text="Clear",
+            font=("Segoe UI", 9),
+            bg=self.theme['input_bg'],
+            fg=self.theme['fg'],
+            relief=tk.FLAT,
+            height=2,
+            command=self._clear_board
+        )
+        clear_btn.grid(row=0, column=1, padx=2, pady=2, sticky="ew")
+
+        flip_btn = tk.Button(
+            setup_grid,
+            text="Flip",
+            font=("Segoe UI", 9),
+            bg=self.theme['input_bg'],
+            fg=self.theme['fg'],
+            relief=tk.FLAT,
+            height=2,
+            command=self._flip_board
+        )
+        flip_btn.grid(row=1, column=0, padx=2, pady=2, sticky="ew")
+
+        self.undo_btn = tk.Button(
+            setup_grid,
+            text="↶ Undo",
+            font=("Segoe UI", 9),
+            bg=self.theme['input_bg'],
+            fg=self.theme['fg'],
+            relief=tk.FLAT,
+            height=2,
+            command=self._undo_last_edit,
+            state=tk.DISABLED
+        )
+        self.undo_btn.grid(row=1, column=1, padx=2, pady=2, sticky="ew")
+
+        # === MACHINE CONTROL ===
+        machine_section = self._create_collapsible_section(scrollable_frame, "🤖 Machine", False)
+
+        # Jog controls
+        tk.Label(
+            machine_section,
+            text="Jog:",
+            font=("Segoe UI", 8, "bold"),
+            bg=self.theme['panel_bg'],
+            fg=self.theme['fg']
+        ).pack(anchor="w", padx=4, pady=(4, 2))
+
+        # Jog distance - compact
+        self.jog_distance = tk.IntVar(value=10)
+        jog_dist = tk.Frame(machine_section, bg=self.theme['panel_bg'])
+        jog_dist.pack(fill=tk.X, padx=4, pady=2)
+
+        for dist in [1, 10, 50, 100]:
+            tk.Radiobutton(
+                jog_dist,
+                text=str(dist),
+                variable=self.jog_distance,
+                value=dist,
+                font=("Segoe UI", 7),
+                bg=self.theme['panel_bg'],
+                fg=self.theme['fg'],
+                selectcolor=self.theme['input_bg']
+            ).pack(side=tk.LEFT, expand=True)
+
+        # Arrow pad - larger touch targets
+        arrow_pad = tk.Frame(machine_section, bg=self.theme['panel_bg'])
+        arrow_pad.pack(pady=4)
+
+        def create_jog_btn(parent, text, row, col, cmd):
+            btn = tk.Button(
+                parent,
+                text=text,
+                font=("Segoe UI", 12, "bold"),
+                width=4,
+                height=2,
+                bg=self.theme['accent'],
+                fg="white",
+                relief=tk.FLAT,
+                command=cmd
+            )
+            btn.grid(row=row, column=col, padx=2, pady=2)
+            return btn
+
+        create_jog_btn(arrow_pad, "▲", 0, 1, lambda: self._handle_jog(0, 1))
+        create_jog_btn(arrow_pad, "◄", 1, 0, lambda: self._handle_jog(-1, 0))
+
+        home_btn = tk.Button(
+            arrow_pad,
+            text="⌂",
+            font=("Segoe UI", 14, "bold"),
+            width=4,
+            height=2,
+            bg=self.theme['warning'],
+            fg="white",
+            relief=tk.FLAT,
+            command=self._handle_home
+        )
+        home_btn.grid(row=1, column=1, padx=2, pady=2)
+
+        create_jog_btn(arrow_pad, "►", 1, 2, lambda: self._handle_jog(1, 0))
+        create_jog_btn(arrow_pad, "▼", 2, 1, lambda: self._handle_jog(0, -1))
+
+        # Move to square
+        tk.Label(
+            machine_section,
+            text="Move to:",
+            font=("Segoe UI", 8, "bold"),
+            bg=self.theme['panel_bg'],
+            fg=self.theme['fg']
+        ).pack(anchor="w", padx=4, pady=(8, 2))
+
+        move_frame = tk.Frame(machine_section, bg=self.theme['panel_bg'])
+        move_frame.pack(fill=tk.X, padx=4, pady=2)
+
+        self.square_entry = tk.Entry(
+            move_frame,
+            font=("Consolas", 11),
+            bg=self.theme['input_bg'],
+            fg=self.theme['fg'],
+            relief=tk.FLAT,
+            width=6
+        )
+        self.square_entry.pack(side=tk.LEFT, ipady=6, ipadx=8)
+        self.square_entry.bind("<Return>", lambda e: self._handle_move_to_square())
+
+        tk.Button(
+            move_frame,
+            text="Go",
+            font=("Segoe UI", 10, "bold"),
+            bg=self.theme['accent'],
+            fg="white",
+            relief=tk.FLAT,
+            padx=16,
+            pady=6,
+            command=self._handle_move_to_square
+        ).pack(side=tk.LEFT, padx=(4, 0))
+
+        # Calibrate
+        tk.Label(
+            machine_section,
+            text="Calibrate:",
+            font=("Segoe UI", 8, "bold"),
+            bg=self.theme['panel_bg'],
+            fg=self.theme['fg']
+        ).pack(anchor="w", padx=4, pady=(8, 2))
+
+        cal_frame = tk.Frame(machine_section, bg=self.theme['panel_bg'])
+        cal_frame.pack(fill=tk.X, padx=4, pady=2)
+
+        self.cal_square_entry = tk.Entry(
+            cal_frame,
+            font=("Consolas", 11),
+            bg=self.theme['input_bg'],
+            fg=self.theme['fg'],
+            relief=tk.FLAT,
+            width=6
+        )
+        self.cal_square_entry.insert(0, "A1")
+        self.cal_square_entry.pack(side=tk.LEFT, ipady=6, ipadx=8)
+        self.cal_square_entry.bind("<Return>", lambda e: self._handle_calibrate())
+
+        tk.Button(
+            cal_frame,
+            text="Set",
+            font=("Segoe UI", 10, "bold"),
+            bg=self.theme['accent'],
+            fg="white",
+            relief=tk.FLAT,
+            padx=16,
+            pady=6,
+            command=self._handle_calibrate
+        ).pack(side=tk.LEFT, padx=(4, 0))
+
+        # Servos - compact
+        tk.Label(
+            machine_section,
+            text="Servos:",
+            font=("Segoe UI", 8, "bold"),
+            bg=self.theme['panel_bg'],
+            fg=self.theme['fg']
+        ).pack(anchor="w", padx=4, pady=(8, 2))
+
+        servo_grid = tk.Frame(machine_section, bg=self.theme['panel_bg'])
+        servo_grid.pack(fill=tk.X, padx=4, pady=2)
+
+        # Lift row
+        tk.Label(servo_grid, text="Lift:", font=("Segoe UI", 8), bg=self.theme['panel_bg'], fg=self.theme['fg']).grid(row=0, column=0, sticky="w", padx=2)
+        tk.Button(servo_grid, text="▲", width=3, font=("Segoe UI", 9), bg="#3498db", fg="white", relief=tk.FLAT, command=self._lift_up).grid(row=0, column=1, padx=1)
+        tk.Button(servo_grid, text="■", width=3, font=("Segoe UI", 9), bg="#95a5a6", fg="white", relief=tk.FLAT, command=self._lift_mid).grid(row=0, column=2, padx=1)
+        tk.Button(servo_grid, text="▼", width=3, font=("Segoe UI", 9), bg="#e74c3c", fg="white", relief=tk.FLAT, command=self._lift_down).grid(row=0, column=3, padx=1)
+
+        # Gripper row
+        tk.Label(servo_grid, text="Grip:", font=("Segoe UI", 8), bg=self.theme['panel_bg'], fg=self.theme['fg']).grid(row=1, column=0, sticky="w", padx=2, pady=(4, 0))
+        tk.Button(servo_grid, text="OPEN", width=6, font=("Segoe UI", 9), bg="#27ae60", fg="white", relief=tk.FLAT, command=self._grip_open).grid(row=1, column=1, columnspan=2, padx=1, pady=(4, 0), sticky="ew")
+        tk.Button(servo_grid, text="CLOSE", width=6, font=("Segoe UI", 9), bg="#e67e22", fg="white", relief=tk.FLAT, command=self._grip_close).grid(row=1, column=3, padx=1, pady=(4, 0))
+
+        # === SYNC SECTION ===
+        sync_section = self._create_collapsible_section(scrollable_frame, "🔄 Sync", True)
+
+        # Status
+        self.sync_status_label = tk.Label(
+            sync_section,
+            text="● Synced" if self.board_state.is_synced() else "● Out of Sync",
+            font=("Segoe UI", 10, "bold"),
+            bg=self.theme['success'] if self.board_state.is_synced() else self.theme['warning'],
+            fg="white",
+            pady=8
+        )
+        self.sync_status_label.pack(fill=tk.X, padx=4, pady=4)
+
+        # Sync buttons
+        self.send_btn = tk.Button(
+            sync_section,
+            text="✓ Physical Matches",
+            font=("Segoe UI", 9),
+            bg=self.theme['success'],
+            fg="white",
+            relief=tk.FLAT,
+            height=2,
+            command=self._send_to_machine
+        )
+        self.send_btn.pack(fill=tk.X, padx=4, pady=2)
+
+        self.auto_btn = tk.Button(
+            sync_section,
+            text="🤖 Auto Move",
+            font=("Segoe UI", 9),
+            bg=self.theme['accent'],
+            fg="white",
+            relief=tk.FLAT,
+            height=2,
+            command=self._auto_update_position
+        )
+        self.auto_btn.pack(fill=tk.X, padx=4, pady=2)
+
+        # === FEN ===
+        fen_section = self._create_collapsible_section(scrollable_frame, "📋 FEN", False)
+
+        self.fen_entry = tk.Entry(
+            fen_section,
+            font=("Consolas", 8),
+            bg=self.theme['input_bg'],
+            fg=self.theme['fg'],
+            relief=tk.FLAT
+        )
+        self.fen_entry.pack(fill=tk.X, padx=4, pady=4, ipady=4)
+
+        fen_btns = tk.Frame(fen_section, bg=self.theme['panel_bg'])
+        fen_btns.pack(fill=tk.X, padx=4, pady=2)
+
+        fen_btns.grid_columnconfigure(0, weight=1)
+        fen_btns.grid_columnconfigure(1, weight=1)
+
+        tk.Button(
+            fen_btns,
+            text="Load",
+            font=("Segoe UI", 9),
+            bg=self.theme['input_bg'],
+            fg=self.theme['fg'],
+            relief=tk.FLAT,
+            height=2,
+            command=self._load_fen
+        ).grid(row=0, column=0, padx=2, sticky="ew")
+
+        tk.Button(
+            fen_btns,
+            text="Copy",
+            font=("Segoe UI", 9),
+            bg=self.theme['input_bg'],
+            fg=self.theme['fg'],
+            relief=tk.FLAT,
+            height=2,
+            command=self._copy_fen
+        ).grid(row=0, column=1, padx=2, sticky="ew")
+
+        # Done building compact UI
+        self._redraw_board()
+        self._update_fen_display()
+
+    def _create_collapsible_section(self, parent, title, expanded=False):
+        """Create a collapsible section for compact UI."""
+        # Container
+        section_frame = tk.Frame(parent, bg=self.theme['panel_bg'])
+        section_frame.pack(fill=tk.X, pady=2)
+
+        # Content frame (will be shown/hidden)
+        content_frame = tk.Frame(section_frame, bg=self.theme['panel_bg'])
+
+        # Toggle function
+        def toggle():
+            if content_frame.winfo_viewable():
+                content_frame.pack_forget()
+                header_btn.config(text=f"▶ {title}")
+            else:
+                content_frame.pack(fill=tk.X, padx=2, pady=2)
+                header_btn.config(text=f"▼ {title}")
+
+        # Header button
+        header_btn = tk.Button(
+            section_frame,
+            text=f"▼ {title}" if expanded else f"▶ {title}",
+            font=("Segoe UI", 10, "bold"),
+            bg=self.theme['accent'],
+            fg="white",
+            relief=tk.FLAT,
+            anchor="w",
+            padx=8,
+            pady=8,
+            command=toggle
+        )
+        header_btn.pack(fill=tk.X)
+
+        # Show content if expanded
+        if expanded:
+            content_frame.pack(fill=tk.X, padx=2, pady=2)
+
+        return content_frame
+
+    def _create_piece_button_compact(self, parent, piece_code: str, symbol: str, row: int, col: int):
+        """Create compact piece button for 7\" touchscreen (TacticsQuest style)."""
+
+        # Load piece image
+        piece_img = load_piece_svg(piece_code, 48)  # Larger for better visibility
+
+        # TacticsQuest style: dark bg with gold selection (solid colors for Tkinter)
+        normal_bg = "#4a4a4a"  # Dark gray
+        hover_bg = "#5a5a5a"   # Slightly lighter on hover
+
+        if piece_img:
+            self.button_images.append(piece_img)
+            # Smaller buttons for 7" touchscreen, standard for desktop
+            btn_size = 38 if self.compact_mode else 60
+            btn = tk.Button(
+                parent,
+                image=piece_img,
+                bg=normal_bg,
+                activebackground=hover_bg,
+                relief=tk.FLAT,
+                width=btn_size,
+                height=btn_size,
+                bd=2,
+                highlightthickness=2,
+                highlightbackground="#666666",  # Default border
+                highlightcolor="#d4af37",        # Gold border on selection
+                command=lambda: self._select_piece(piece_code)
+            )
+        else:
+            # Fallback to Unicode with better contrast
+            btn = tk.Button(
+                parent,
+                text=symbol,
+                font=("Segoe UI", 20),
+                bg=normal_bg,
+                fg="#ffffff",  # White text for visibility on dark bg
+                activebackground=hover_bg,
+                relief=tk.FLAT,
+                width=2,
+                height=1,
+                bd=2,
+                highlightthickness=2,
+                highlightbackground="#666666",
+                highlightcolor="#d4af37",
+                command=lambda: self._select_piece(piece_code)
+            )
+
+        btn.grid(row=row, column=col, padx=2, pady=2, sticky="nsew")
+
+        # Make button scale with grid
+        parent.grid_rowconfigure(row, weight=1)
+
     def _create_tooltip(self, widget, text):
         """Create a tooltip for a widget."""
         return ToolTip(widget, text)
@@ -942,6 +1473,58 @@ class EditorWindow(tk.Frame):
             )
 
         btn.grid(row=row, column=col, padx=2, pady=2, sticky="ew")
+
+    def _create_piece_button_desktop(self, parent, piece_code: str, symbol: str, row: int, col: int):
+        """Create desktop piece button with TacticsQuest styling."""
+
+        # Load piece image
+        piece_img = load_piece_svg(piece_code, 55)  # 55px for desktop
+
+        # TacticsQuest style: dark bg with gold selection (solid colors for Tkinter)
+        normal_bg = "#4a4a4a"  # Dark gray
+        hover_bg = "#5a5a5a"   # Slightly lighter on hover
+
+        if piece_img:
+            self.button_images.append(piece_img)
+            btn = tk.Button(
+                parent,
+                image=piece_img,
+                bg=normal_bg,
+                activebackground=hover_bg,
+                relief=tk.FLAT,
+                width=70,
+                height=70,
+                bd=2,
+                highlightthickness=2,
+                highlightbackground="#666666",  # Default border
+                highlightcolor="#d4af37",        # Gold border on selection
+                cursor="hand2",
+                command=lambda: self._select_piece(piece_code)
+            )
+        else:
+            # Fallback to Unicode with better contrast
+            btn = tk.Button(
+                parent,
+                text=symbol,
+                font=("Segoe UI", 24),
+                bg=normal_bg,
+                fg="#ffffff",  # White text for visibility on dark bg
+                activebackground=hover_bg,
+                relief=tk.FLAT,
+                width=2,
+                height=1,
+                bd=2,
+                highlightthickness=2,
+                highlightbackground="#666666",
+                highlightcolor="#d4af37",
+                cursor="hand2",
+                command=lambda: self._select_piece(piece_code)
+            )
+
+        btn.grid(row=row, column=col, padx=3, pady=3, sticky="nsew")
+
+        # Make button scale with grid
+        parent.grid_rowconfigure(row, weight=1)
 
     def _select_piece(self, piece_code: str):
         """Select a piece for placement."""
@@ -1299,31 +1882,62 @@ class EditorWindow(tk.Frame):
                         )
 
         # Draw file/rank labels
+        # Play area boundaries for labeling
+        play_area = self.board_cfg.play_area
+        min_play_file = play_area.min_file if play_area else 0
+        max_play_file = play_area.max_file if play_area else (files - 1)
+        min_play_rank = play_area.min_rank if play_area else 0
+        max_play_rank = play_area.max_rank if play_area else (ranks - 1)
+
+        # File labels (columns) - draw at bottom of board
         for file in range(files):
             display_file = file if self.board_orientation == 'white' else (files - 1 - file)
-            label = chr(ord('A') + display_file)
 
-            # Check if this file is in storage area (for perimeter layouts)
-            is_storage_file = not self.board_cfg.is_playing_square(file, 0)
+            # Check if this file column is in the playing area
+            is_playing_file = (min_play_file <= file <= max_play_file)
 
-            # Use different color/style for storage files
-            label_color = "#f39c12" if is_storage_file else self.theme['text_secondary']
-            label_font = ("Arial", 10, "bold") if is_storage_file else ("Arial", 10)
+            if is_playing_file:
+                # Playing area column: standard chess notation A-H
+                play_file_idx = file - min_play_file
+                label = chr(ord('A') + play_file_idx)
+                label_color = self.theme['text_secondary']
+                label_font = ("Arial", 10)
+            else:
+                # Storage column: AA for left (file < min_play_file), HH for right (file > max_play_file)
+                if file < min_play_file:
+                    label = "AA"
+                else:
+                    label = "HH"
+                label_color = "#f39c12"
+                label_font = ("Arial", 10, "bold")
 
             x = board_offset_x + (file + 0.5) * sq_size
             y = board_offset_y + board_height_px + 15
             c.create_text(x, y, text=label, fill=label_color, font=label_font)
 
+        # Rank labels (rows) - draw at left of board
         for rank in range(ranks):
             display_rank = rank if self.board_orientation == 'white' else (ranks - 1 - rank)
-            label = str(display_rank + 1)
 
-            # Check if this rank is in storage area
-            is_storage_rank = not self.board_cfg.is_playing_square(0, rank)
+            # Check if this rank row is in the playing area
+            is_playing_rank = (min_play_rank <= rank <= max_play_rank)
 
-            # Use different color/style for storage ranks
-            label_color = "#f39c12" if is_storage_rank else self.theme['text_secondary']
-            label_font = ("Arial", 10, "bold") if is_storage_rank else ("Arial", 10)
+            if is_playing_rank:
+                # Playing area row: standard chess notation 1-8
+                play_rank_idx = rank - min_play_rank
+                label = str(play_rank_idx + 1)
+                label_color = self.theme['text_secondary']
+                label_font = ("Arial", 10)
+            else:
+                # Storage rows: 00 for bottom, 88 for first top row, 99 for second top row
+                if rank < min_play_rank:
+                    label = "00"  # Bottom storage
+                elif rank == max_play_rank + 1:
+                    label = "88"  # First top storage row
+                else:
+                    label = "99"  # Second top storage row
+                label_color = "#f39c12"
+                label_font = ("Arial", 10, "bold")
 
             x = board_offset_x - 15
             y = board_offset_y + (ranks - 1 - rank + 0.5) * sq_size

@@ -61,8 +61,28 @@ class BoardApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Chess Mover Machine")
-        self.geometry("1000x700")
-        self.minsize(900, 600)
+
+        # Auto-detect screen size and optimize for touchscreen
+        screen_width = self.winfo_screenwidth()
+        screen_height = self.winfo_screenheight()
+
+        print(f"[BoardApp] Detected screen: {screen_width}x{screen_height}")
+
+        # Check if this is a small touchscreen (7" = 1024x600, 800x480, etc.)
+        self.is_touchscreen = (screen_width <= 1024 and screen_height <= 600)
+        print(f"[BoardApp] is_touchscreen = {self.is_touchscreen}")
+
+        if self.is_touchscreen:
+            # Touchscreen mode - fullscreen
+            self.geometry(f"{screen_width}x{screen_height}")
+            self.attributes('-fullscreen', True)
+            self.minsize(screen_width, screen_height)
+            # Add escape key binding to exit fullscreen
+            self.bind('<Escape>', lambda e: self.attributes('-fullscreen', False))
+        else:
+            # Desktop mode - windowed
+            self.geometry("1000x700")
+            self.minsize(900, 600)
 
         # Theme management
         self.current_theme = 'dark'
@@ -83,20 +103,26 @@ class BoardApp(tk.Tk):
         )
         self.gantry = GantryController(self._log, safety_limits=machine_limits)
 
+        # Enable keep-alive ping to prevent Falcon's 30-second laser rail power timeout
+        # This keeps the LM2596 voltage regulator and servos powered
+        self.gantry.enable_keep_alive(enable=True, interval=25.0)
+
         safety_cfg = self.settings.get_safety()
         self.gantry.max_speed_mm_min = safety_cfg.get('max_speed_mm_min', 5000)
         self.gantry.min_speed_mm_min = safety_cfg.get('min_speed_mm_min', 100)
         self.gantry.enable_speed_limit = safety_cfg.get('enable_speed_limit', True)
 
-        self.servos = ServoController(self._log)
+        # Initialize servos with safe log wrapper (txt_log doesn't exist yet)
+        self.servos = ServoController(self._safe_log)
+
         self.move_planner = MovePlanner(self.board_cfg)
 
         # Track gantry position for highlighting
         self.current_gantry_square = None
         self.highlight_square_tag = None
 
-        # Board state for editor
-        self.board_state = BoardState()
+        # Board state for editor (pass board_cfg for play area awareness)
+        self.board_state = BoardState(board_cfg=self.board_cfg)
 
         # View management
         self.current_view = 'main'  # 'main' or 'editor'
@@ -104,6 +130,7 @@ class BoardApp(tk.Tk):
         self.editor_view_frame = None
 
         self._build_ui()
+
         self._poll_grbl()
         self._poll_servos()
         self._poll_position()  # Poll gantry position for highlighting
@@ -155,12 +182,19 @@ class BoardApp(tk.Tk):
         self._build_ui()
 
     def _create_button(self, parent, text, command, **kwargs):
-        """Create a modern styled button."""
+        """Create a modern styled button with touch-friendly sizing."""
         bg = kwargs.pop('bg', self.theme['button_bg'])
         fg = kwargs.pop('fg', self.theme['button_fg'])
-        padx = kwargs.pop('padx', 16)
-        pady = kwargs.pop('pady', 8)
-        font = kwargs.pop('font', ("Segoe UI", 9))
+
+        # Touch-friendly sizing for 1024x600 display
+        if self.is_touchscreen:
+            padx = kwargs.pop('padx', 18)  # Bigger for touch
+            pady = kwargs.pop('pady', 10)  # Bigger for touch (44px minimum)
+            font = kwargs.pop('font', ("Segoe UI", 9))  # Readable on small screen
+        else:
+            padx = kwargs.pop('padx', 16)
+            pady = kwargs.pop('pady', 8)
+            font = kwargs.pop('font', ("Segoe UI", 9))
 
         btn = tk.Button(
             parent,
@@ -198,58 +232,69 @@ class BoardApp(tk.Tk):
         toolbar.pack(side=tk.TOP, fill=tk.X)
         toolbar.pack_propagate(False)
 
-        # Left side - branding
-        left_toolbar = tk.Frame(toolbar, bg=self.theme['panel_bg'])
-        left_toolbar.pack(side=tk.LEFT, padx=20, pady=10)
+        # Left side - branding (hide on touchscreen to save space)
+        if not self.is_touchscreen:
+            left_toolbar = tk.Frame(toolbar, bg=self.theme['panel_bg'])
+            left_toolbar.pack(side=tk.LEFT, padx=20, pady=10)
 
-        tk.Label(
-            left_toolbar,
-            text="♟ Chess Mover Machine",
-            font=("Segoe UI", 14, "bold"),
-            bg=self.theme['panel_bg'],
-            fg=self.theme['accent']
-        ).pack(side=tk.LEFT)
+            tk.Label(
+                left_toolbar,
+                text="♟ Chess Mover Machine",
+                font=("Segoe UI", 14, "bold"),
+                bg=self.theme['panel_bg'],
+                fg=self.theme['accent']
+            ).pack(side=tk.LEFT)
 
-        # Middle - Profile selector
-        middle_toolbar = tk.Frame(toolbar, bg=self.theme['panel_bg'])
-        middle_toolbar.pack(side=tk.LEFT, expand=True)
+        # Middle - Profile selector (hide on touchscreen, will be in right panel)
+        if not self.is_touchscreen:
+            middle_toolbar = tk.Frame(toolbar, bg=self.theme['panel_bg'])
+            middle_toolbar.pack(side=tk.LEFT, expand=True)
 
-        tk.Label(
-            middle_toolbar,
-            text="Profile:",
-            font=("Segoe UI", 9),
-            bg=self.theme['panel_bg'],
-            fg=self.theme['text_secondary']
-        ).pack(side=tk.LEFT, padx=(0, 5))
+            tk.Label(
+                middle_toolbar,
+                text="Profile:",
+                font=("Segoe UI", 9),
+                bg=self.theme['panel_bg'],
+                fg=self.theme['text_secondary']
+            ).pack(side=tk.LEFT, padx=(0, 5))
 
-        self.profile_var = tk.StringVar(value=self.settings.get_active_profile_name())
-        self.profile_combo = ttk.Combobox(
-            middle_toolbar,
-            textvariable=self.profile_var,
-            values=self.settings.get_profile_names(),
-            state='readonly',
-            width=25,
-            font=("Segoe UI", 9)
-        )
-        self.profile_combo.pack(side=tk.LEFT)
-        self.profile_combo.bind('<<ComboboxSelected>>', lambda e: self._switch_profile())
+            self.profile_var = tk.StringVar(value=self.settings.get_active_profile_name())
+            self.profile_combo = ttk.Combobox(
+                middle_toolbar,
+                textvariable=self.profile_var,
+                values=self.settings.get_profile_names(),
+                state='readonly',
+                width=25,
+                font=("Segoe UI", 9)
+            )
+            self.profile_combo.pack(side=tk.LEFT)
+            self.profile_combo.bind('<<ComboboxSelected>>', lambda e: self._switch_profile())
+        else:
+            # Touchscreen: profile selector will be in right panel via EditorWindow
+            self.profile_var = tk.StringVar(value=self.settings.get_active_profile_name())
+            self.profile_combo = None  # Will be created in EditorWindow
 
         # Right side - controls
         right_toolbar = tk.Frame(toolbar, bg=self.theme['panel_bg'])
         right_toolbar.pack(side=tk.RIGHT, padx=20, pady=10)
 
-        # Theme toggle button
-        theme_icon = "☀" if self.current_theme == 'dark' else "☾"
-        self._create_button(
-            right_toolbar,
-            text=theme_icon,
-            command=self._toggle_theme,
-            bg=self.theme['panel_bg'],
-            fg=self.theme['fg'],
-            padx=12,
-            pady=6,
-            font=("Segoe UI", 12)
-        ).pack(side=tk.RIGHT, padx=4)
+        # Theme toggle button (hide on touchscreen to save space)
+        if not self.is_touchscreen:
+            theme_icon = "☀" if self.current_theme == 'dark' else "☾"
+            self._create_button(
+                right_toolbar,
+                text=theme_icon,
+                command=self._toggle_theme,
+                bg=self.theme['panel_bg'],
+                fg=self.theme['fg'],
+                padx=12,
+                pady=6,
+                font=("Segoe UI", 12)
+            ).pack(side=tk.RIGHT, padx=4)
+
+        # Add Logs button for touchscreen mode
+        if self.is_touchscreen:
+            self._create_button(right_toolbar, text="Logs", command=self._toggle_logs, bg=self.theme['panel_bg'], fg=self.theme['fg']).pack(side=tk.RIGHT, padx=4)
 
         self._create_button(right_toolbar, text="Test Path", command=self._test_path).pack(side=tk.RIGHT, padx=4)
         self._create_button(right_toolbar, text="Settings", command=self._open_settings).pack(side=tk.RIGHT, padx=4)
@@ -258,17 +303,67 @@ class BoardApp(tk.Tk):
         self.connect_btn = self._create_button(right_toolbar, text="Connect", command=self._toggle_connection, bg=self.theme['success'])
         self.connect_btn.pack(side=tk.RIGHT, padx=4)
 
-        # Main content area - unified editor view
-        self.content_container = tk.Frame(self, bg=self.theme['bg'])
-        self.content_container.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        # Create log widget FIRST (needed by TrainingPanel during init)
+        self.log_frame = tk.Frame(self, bg=self.theme['bg'])
 
-        # Create unified editor view with all machine controls
+        # Only pack log frame on desktop (hide on touchscreen)
+        if not self.is_touchscreen:
+            self.log_frame.pack(fill=tk.X, padx=10, pady=(10, 10))
+
+        tk.Label(
+            self.log_frame,
+            text="Command Log",
+            font=("Segoe UI", 10, "bold"),
+            bg=self.theme['bg'],
+            fg=self.theme['fg']
+        ).pack(anchor="w")
+
+        self.txt_log = tk.Text(
+            self.log_frame,
+            height=15 if self.is_touchscreen else 6,  # Taller for touchscreen overlay
+            bg=self.theme['input_bg'],
+            fg=self.theme['input_fg'],
+            font=("Consolas", 8),
+            relief=tk.FLAT,
+            bd=0,
+            padx=8,
+            pady=8
+        )
+        self.txt_log.pack(fill=tk.X)
+
+        # Track log visibility state for touchscreen
+        self.logs_visible = False
+
+        # Main content area with tabs
+        self.content_container = tk.Frame(self, bg=self.theme['bg'])
+        self.content_container.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
+
+        # Create notebook (tabbed interface)
+        # Hide tabs on touchscreen to save space
+        if self.is_touchscreen:
+            # No tabs on touchscreen - just use frames directly
+            board_tab = tk.Frame(self.content_container, bg=self.theme['bg'])
+            board_tab.pack(fill=tk.BOTH, expand=True)
+        else:
+            # Desktop mode - use tabs
+            self.notebook = ttk.Notebook(self.content_container)
+            self.notebook.pack(fill=tk.BOTH, expand=True)
+
+            # Tab 1: Board Control (existing editor)
+            board_tab = tk.Frame(self.notebook, bg=self.theme['bg'])
+            self.notebook.add(board_tab, text="  Board Control  ")
+
+        # Create unified editor view in board tab
         self.editor_view = EditorWindow(
-            self.content_container,
+            board_tab,
             self.board_state,
             self.board_cfg,
             self.gantry,
             self.servos,
+            settings_obj=self.settings,
+            compact_mode=self.is_touchscreen,  # Pass touchscreen flag
+            profile_var=self.profile_var if self.is_touchscreen else None,  # Pass profile selector for touchscreen
+            on_profile_change=self._switch_profile if self.is_touchscreen else None,
             on_send_to_machine=self._editor_send_to_machine,
             on_get_from_machine=self._editor_get_from_machine,
             on_auto_update=self._editor_auto_update,
@@ -282,30 +377,19 @@ class BoardApp(tk.Tk):
         # Keep canvas reference for board highlighting (used by _poll_position)
         self.canvas = self.editor_view.canvas
 
-        # Create log widget for machine output (outside of editor)
-        log_frame = tk.Frame(self, bg=self.theme['bg'])
-        log_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
+        # Tab 2: AI Training (only on desktop, hide on touchscreen)
+        if not self.is_touchscreen:
+            training_tab = tk.Frame(self.notebook, bg=self.theme['bg'])
+            self.notebook.add(training_tab, text="  AI Training  ")
 
-        tk.Label(
-            log_frame,
-            text="📋 Command Log",
-            font=("Segoe UI", 10, "bold"),
-            bg=self.theme['bg'],
-            fg=self.theme['fg']
-        ).pack(anchor="w")
-
-        self.txt_log = tk.Text(
-            log_frame,
-            height=6,
-            bg=self.theme['input_bg'],
-            fg=self.theme['input_fg'],
-            font=("Consolas", 8),
-            relief=tk.FLAT,
-            bd=0,
-            padx=8,
-            pady=8
-        )
-        self.txt_log.pack(fill=tk.X)
+            # Import and create training panel
+            from .training_panel import TrainingPanel
+            self.training_panel = TrainingPanel(
+                training_tab,
+                theme=self.theme,
+                log_fn=self._log
+            )
+            self.training_panel.pack(fill=tk.BOTH, expand=True)
 
         # Status bar
         self.status = tk.StringVar(value="Disconnected")
@@ -968,41 +1052,6 @@ class BoardApp(tk.Tk):
             command=lambda: self._grip_increment(-1)
         ).pack(side=tk.LEFT, padx=2)
 
-        # Command log (more compact)
-        tk.Label(right_panel, text="📋 Command Log", font=("Segoe UI", 10, "bold"), bg=self.theme["bg"], fg=self.theme["fg"], anchor="w", padx=10, pady=5).pack(anchor="w", padx=6, pady=(5,2))
-        self.txt_log = tk.Text(
-            right_panel,
-            height=8,
-            bg=self.theme["input_bg"],
-            fg=self.theme["input_fg"],
-            font=("Consolas", 8),
-            relief=tk.FLAT,
-            bd=0,
-            padx=8,
-            pady=8,
-            insertbackground=self.theme["accent"]
-        )
-        self.txt_log.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 8))
-
-        # Status bar
-        self.status = tk.StringVar(value="Disconnected")
-        status_bar = tk.Frame(self, bg=self.theme["panel_bg"], height=30)
-        status_bar.pack(side=tk.BOTTOM, fill=tk.X)
-        status_bar.pack_propagate(False)
-
-        stbar = tk.Label(
-            status_bar,
-            textvariable=self.status,
-            anchor="w",
-            bg=self.theme["panel_bg"],
-            fg=self.theme["fg"],
-            font=("Segoe UI", 9),
-            padx=20,
-            pady=5
-        )
-        stbar.pack(side=tk.BOTTOM, fill=tk.X)
-
-        self._redraw_board()
 
     def _redraw_board(self):
         c = self.canvas
@@ -1153,6 +1202,20 @@ class BoardApp(tk.Tk):
         """Legacy disconnect method - calls toggle."""
         if self.gantry._state == ConnectionState.CONNECTED:
             self._toggle_connection()
+
+    def _toggle_logs(self):
+        """Toggle log visibility on touchscreen."""
+        if not self.is_touchscreen:
+            return  # Only for touchscreen mode
+
+        if self.logs_visible:
+            # Hide logs
+            self.log_frame.pack_forget()
+            self.logs_visible = False
+        else:
+            # Show logs in fullscreen overlay (pack after toolbar, before content)
+            self.log_frame.pack(after=self.winfo_children()[0], fill=tk.BOTH, expand=True, padx=10, pady=10)
+            self.logs_visible = True
 
     def _home(self):
         self.gantry.home()
@@ -1562,6 +1625,13 @@ class BoardApp(tk.Tk):
             return self.gantry.list_ports()
         except Exception:
             return []
+
+    def _safe_log(self, msg: str):
+        """Safe log function that works before txt_log is created."""
+        if hasattr(self, 'txt_log'):
+            self.txt_log.insert(tk.END, msg + "\n")
+            self.txt_log.see(tk.END)
+        # If txt_log doesn't exist yet, silently ignore (during initialization)
 
     def _log(self, msg: str):
         self.txt_log.insert(tk.END, msg + "\n")

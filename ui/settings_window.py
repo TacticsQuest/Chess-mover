@@ -2,6 +2,20 @@ import tkinter as tk
 from tkinter import ttk
 from typing import Callable
 
+# Board theme names (must match BOARD_THEMES in editor_window.py)
+THEME_NAMES = [
+    'Classic Brown',
+    'Green',
+    'Blue',
+    'Gray',
+    'Black & White',
+    'Wood',
+    'Ice',
+    'Purple',
+    'Red',
+    'Newspaper'
+]
+
 class SettingsWindow(tk.Toplevel):
     def __init__(self, master, board_cfg: dict, serial_cfg: dict, safety_cfg: dict, ports: list[str], on_save: Callable[[dict, dict, dict], None], settings_obj=None):
         super().__init__(master)
@@ -68,9 +82,23 @@ class SettingsWindow(tk.Toplevel):
         self._add_labeled_entry(frm_safety, 1, "Max Speed (mm/min)", safety_cfg.get('max_speed_mm_min', 5000))
         self._add_labeled_entry(frm_safety, 2, "Min Speed (mm/min)", safety_cfg.get('min_speed_mm_min', 100))
 
+        # UI Settings (Board Theme)
+        frm_ui = ttk.LabelFrame(self, text="Appearance")
+        frm_ui.grid(row=4, column=0, padx=8, pady=8, sticky="ew")
+
+        ttk.Label(frm_ui, text="Board Theme").grid(row=0, column=0, sticky="w", padx=6, pady=6)
+        self.cmb_theme = ttk.Combobox(frm_ui, values=THEME_NAMES, width=20, state="readonly")
+        self.cmb_theme.grid(row=0, column=1, padx=6, pady=6, sticky="w")
+
+        # Get current theme from settings
+        current_theme = 'Classic Brown'
+        if self.settings_obj:
+            current_theme = self.settings_obj.get_board_theme()
+        self.cmb_theme.set(current_theme)
+
         # Buttons
         frm_btn = ttk.Frame(self)
-        frm_btn.grid(row=4, column=0, padx=8, pady=8, sticky="e")
+        frm_btn.grid(row=5, column=0, padx=8, pady=8, sticky="e")
         ttk.Button(frm_btn, text="Cancel", command=self.destroy).grid(row=0, column=0, padx=6)
         ttk.Button(frm_btn, text="Save", command=self._save).grid(row=0, column=1)
 
@@ -100,6 +128,13 @@ class SettingsWindow(tk.Toplevel):
             'max_speed_mm_min': int(self.ent_max_speed.get().strip() or 5000),
             'min_speed_mm_min': int(self.ent_min_speed.get().strip() or 100),
         }
+
+        # Save board theme
+        if self.settings_obj:
+            theme_name = self.cmb_theme.get()
+            self.settings_obj.set_board_theme(theme_name)
+            self.settings_obj.save()
+
         self.on_save(board_cfg, serial_cfg, safety_cfg)
         self.destroy()
 

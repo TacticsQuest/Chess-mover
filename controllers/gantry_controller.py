@@ -72,6 +72,11 @@ class GantryController:
         self.min_speed_mm_min = 100   # Minimum allowed speed
         self.enable_speed_limit = True  # Enable/disable speed limiting
 
+        # Keep-alive "ping" to prevent laser rail power timeout
+        self._keep_alive_enabled = False
+        self._keep_alive_interval = 25.0  # seconds (below 30s timeout)
+        self._keep_alive_thread: Optional[threading.Thread] = None
+
     @staticmethod
     def list_ports() -> list[str]:
         """List available serial ports."""
@@ -94,6 +99,22 @@ class GantryController:
         self._auto_reconnect = enable
         if enable:
             self.log("[GRBL] Auto-reconnect enabled")
+
+    def enable_keep_alive(self, enable: bool = True, interval: float = 25.0) -> None:
+        """
+        Enable/disable keep-alive ping to prevent laser rail power timeout.
+
+        The Falcon laser engraver cuts power to the laser rail after 30 seconds of inactivity.
+        This ping sends M3 S1 (laser on at minimal power) every 25 seconds to keep it alive.
+        This is necessary to keep the LM2596 voltage regulator and servos powered.
+
+        Args:
+            enable: True to enable keep-alive, False to disable
+            interval: Seconds between pings (default 25, must be < 30)
+        """
+        self._keep_alive_enabled = enable
+        self._keep_alive_interval = interval
+        # Don't log here - logging happens when connection starts (in connect())
 
     def emergency_stop(self) -> None:
         """Emergency stop - immediately halt all motion."""
@@ -191,6 +212,12 @@ class GantryController:
             self._health_thread = threading.Thread(target=self._health_monitor, daemon=True)
             self._health_thread.start()
 
+            # Start keep-alive thread if enabled
+            if self._keep_alive_enabled:
+                self._keep_alive_thread = threading.Thread(target=self._keep_alive_loop, daemon=True)
+                self._keep_alive_thread.start()
+                self.log(f"[GRBL] Keep-alive thread started (ping every {self._keep_alive_interval}s)")
+
             self._state = ConnectionState.CONNECTED
             self.log(f"[GRBL] ✓ Connected on {port} @ {baud}")
 
@@ -203,6 +230,16 @@ class GantryController:
         """Disconnect from GRBL controller."""
         self._running = False
         self._auto_reconnect = False
+
+        # Turn off laser before disconnecting (if keep-alive was enabled)
+        if self._ser and self._keep_alive_enabled:
+            try:
+                self._ser.write(b'M5\n')  # Laser off
+                self._ser.flush()
+                self.log("[GRBL] Laser off (M5)")
+            except Exception as e:
+                self.log(f"[GRBL] Failed to turn off laser: {e}")
+
         if self._ser:
             try:
                 self._ser.close()
@@ -290,6 +327,29 @@ class GantryController:
                         # Attempt reconnection if enabled
                         if self._auto_reconnect:
                             self._attempt_reconnect()
+
+    def _keep_alive_loop(self) -> None:
+        """
+        Background thread to send keep-alive pings.
+
+        Sends M3 S1 (laser on at minimal 1/255 power) every interval to prevent
+        the Falcon's 30-second power timeout on the laser rail.
+        """
+        while self._running and self._keep_alive_enabled:
+            time.sleep(self._keep_alive_interval)
+
+            if not self._running or not self._keep_alive_enabled:
+                break
+
+            if self._ser and self._state == ConnectionState.CONNECTED:
+                try:
+                    # Send M3 S1 - laser on at minimal power (1/255)
+                    # This keeps the laser rail powered without actually firing the laser
+                    self._ser.write(b'M3 S1\n')
+                    self._ser.flush()
+                    self.log("[GRBL] 💓 Keep-alive ping sent (M3 S1)")
+                except Exception as e:
+                    self.log(f"[GRBL] Keep-alive error: {e}")
 
     def _attempt_reconnect(self) -> None:
         """Attempt to reconnect to GRBL."""
