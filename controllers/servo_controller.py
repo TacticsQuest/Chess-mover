@@ -6,7 +6,7 @@ Controls:
 2. Gripper Servo - Open/Close for piece gripping
 
 Phase 1 (Windows): Stubs for testing UI
-Phase 3 (Raspberry Pi): Real PCA9685 PWM control
+Phase 3 (Raspberry Pi): Direct GPIO PWM control
 """
 
 class ServoController:
@@ -27,11 +27,11 @@ class ServoController:
     - Current position tracking
     """
 
-    # Servo positions (PWM values for PCA9685)
+    # Servo positions (PWM duty cycle controlled via GPIO)
     # USABLE RANGE: 0° to 274° (75% of 365° gear rotation)
     # The gear can physically rotate 365° total, but we limit to 75% (274°) to prevent binding
     # Note: Standard servos go 0-180°, but with extended range servo or continuous rotation,
-    # we can use up to 274° (mapped through PCA9685 PWM values)
+    # we can use up to 274° (mapped through GPIO PWM duty cycle)
     LIFT_UP_POS = 274      # Degrees (fully up, clear of all pieces) - 75% of 365°
     LIFT_DOWN_POS = 0      # Degrees (at board level, gripper touching board)
     LIFT_MID_POS = 137     # Degrees (halfway between 0° and 274°)
@@ -86,10 +86,10 @@ class ServoController:
         self.lift_pos = self.LIFT_UP_POS  # Start in up position (135°)
         self.grip_pos = self.GRIP_OPEN_POS  # Start open (0°)
 
-        # Hardware connection (Phase 3)
-        self.pca9685 = None
-        self.lift_channel = 0  # PCA9685 channel for lift servo
-        self.grip_channel = 1  # PCA9685 channel for gripper servo
+        # Hardware connection (Phase 3: pigpio)
+        self.pi = None            # pigpio connection object
+        self.lift_pin = 17        # GPIO pin 17 (Physical PIN 11) for Z-axis lift servo
+        self.grip_pin = 27        # GPIO pin 27 (Physical PIN 13) for gripper servo
 
         # State tracking
         self.is_connected = False
@@ -103,76 +103,119 @@ class ServoController:
 
     def connect(self):
         """
-        Initialize PCA9685 connection (Phase 3 only).
-        For Phase 1 (Windows), this is a stub.
+        Initialize pigpio connection for precise servo control.
+        pigpio provides microsecond-level PWM precision for smooth servo operation.
         """
         try:
-            # Phase 3: Uncomment this when on Raspberry Pi
-            # from adafruit_servokit import ServoKit
-            # self.pca9685 = ServoKit(channels=16)
-            # self.is_connected = True
-            # self.log("[SERVO] Connected to PCA9685")
+            # Phase 3: Raspberry Pi pigpio Control (best for servos)
+            import pigpio
+            self.pi = pigpio.pi()
 
-            # Phase 1: Stub
-            self.log("[SERVO] connect() - stub (Phase 1)")
-            self.is_connected = False  # Set to True in Phase 3
+            if not self.pi.connected:
+                raise Exception("Failed to connect to pigpiod daemon")
+
+            # Set servo pins to output mode
+            self.pi.set_mode(self.lift_pin, pigpio.OUTPUT)
+            self.pi.set_mode(self.grip_pin, pigpio.OUTPUT)
+
+            # Initialize servos to safe positions (off)
+            self.pi.set_servo_pulsewidth(self.lift_pin, 0)
+            self.pi.set_servo_pulsewidth(self.grip_pin, 0)
+
+            self.is_connected = True
+            self.log(f"[SERVO] Connected via pigpio to GPIO {self.lift_pin} (lift) and {self.grip_pin} (gripper)")
+            self.log(f"[SERVO] Using hardware PWM for microsecond precision")
 
         except Exception as e:
             self.log(f"[SERVO] Connection failed: {e}")
+            self.log(f"[SERVO] Tip: Ensure pigpio library is installed and you have GPIO permissions")
             self.is_connected = False
+            self.pi = None
 
-    def _set_servo(self, channel: int, angle: int):
+    def _angle_to_pulsewidth(self, angle: int, max_angle: int = 180) -> int:
         """
-        Set servo to specific angle (instant movement).
+        Convert angle to PWM pulsewidth in microseconds (for pigpio).
+
+        Standard servo timing:
+        - 500μs pulse = 0° (minimum)
+        - 1500μs pulse = 90° (center)
+        - 2500μs pulse = 180° (maximum)
+
+        For extended range (0-274°), we scale accordingly.
 
         Args:
-            channel: PCA9685 channel (0-15)
-            angle: Angle in degrees (0-274 for lift servo, 0-180 for gripper)
+            angle: Desired angle
+            max_angle: Maximum angle range (180 or 274)
+
+        Returns:
+            Pulsewidth in microseconds (500-2500μs for standard servos)
         """
-        # Clamp angle to valid range based on channel
-        if channel == self.lift_channel:
+        # Standard servo uses 500-2500μs pulsewidth for 0-180°
+        # For 0-274° we extend the range proportionally
+        min_pulse = 500   # microseconds
+        max_pulse = 2500  # microseconds
+
+        # Scale angle to pulsewidth
+        pulse_range = max_pulse - min_pulse
+        pulsewidth = min_pulse + (angle / max_angle) * pulse_range
+
+        return int(pulsewidth)
+
+    def _set_servo(self, pin: int, angle: int):
+        """
+        Set servo to specific angle (instant movement) using pigpio.
+
+        Args:
+            pin: GPIO pin number (17 for lift, 27 for gripper)
+            angle: Angle in degrees (0-274 for lift servo, 0-90 for gripper)
+        """
+        # Clamp angle to valid range based on pin
+        if pin == self.lift_pin:
             # Lift servo: 0° to 274° (75% of 365°)
             angle = max(0, min(274, angle))
+            max_angle = 274
         else:
             # Gripper servo: limited to 0° to 90°
             angle = max(0, min(90, angle))
+            max_angle = 180  # Standard servo range for pulsewidth calculation
 
-        if self.is_connected and self.pca9685:
-            # Phase 3: Real hardware
-            self.pca9685.servo[channel].angle = angle
-            self.log(f"[SERVO] Channel {channel} → {angle}°")
+        if self.is_connected and self.pi:
+            # Phase 3: Real hardware (pigpio)
+            pulsewidth = self._angle_to_pulsewidth(angle, max_angle)
+            self.pi.set_servo_pulsewidth(pin, pulsewidth)
+            self.log(f"[SERVO] GPIO {pin} → {angle}° (pulsewidth: {pulsewidth}μs)")
         else:
             # Phase 1: Stub
-            self.log(f"[SERVO] Channel {channel} → {angle}° (stub)")
+            self.log(f"[SERVO] GPIO {pin} → {angle}° (stub)")
 
-    def _set_servo_smooth(self, channel: int, target_angle: int, speed_deg_per_sec: int):
+    def _set_servo_smooth(self, pin: int, target_angle: int, speed_deg_per_sec: int):
         """
         Move servo smoothly to target angle at specified speed.
         Prevents jerky motion and reduces stress on servos.
 
         Args:
-            channel: PCA9685 channel (0-15)
+            pin: GPIO pin number (12 for lift, 13 for gripper)
             target_angle: Target angle in degrees (0-274 for lift, 0-180 for gripper)
             speed_deg_per_sec: Movement speed in degrees per second
 
         Example:
-            _set_servo_smooth(0, 90, SPEED_SLOW)  # Move to 90° slowly
+            _set_servo_smooth(12, 90, SPEED_SLOW)  # Move lift to 90° slowly
         """
         import time
 
-        # Clamp target to valid range based on channel
-        if channel == self.lift_channel:
+        # Clamp target to valid range based on pin
+        if pin == self.lift_pin:
             target_angle = max(0, min(274, target_angle))
         else:
             target_angle = max(0, min(90, target_angle))
 
         # Get current position
-        if channel == self.lift_channel:
+        if pin == self.lift_pin:
             current_angle = self.lift_pos
-        elif channel == self.grip_channel:
+        elif pin == self.grip_pin:
             current_angle = self.grip_pos
         else:
-            current_angle = 90  # Default if unknown channel
+            current_angle = 90  # Default if unknown pin
 
         # Calculate movement
         delta = target_angle - current_angle
@@ -192,23 +235,23 @@ class ServoController:
         angle = current_angle
         while abs(target_angle - angle) > self.SMOOTH_STEP_SIZE:
             angle += step
-            self._set_servo(channel, int(angle))
+            self._set_servo(pin, int(angle))
 
             # Update tracked position
-            if channel == self.lift_channel:
+            if pin == self.lift_pin:
                 self.lift_pos = int(angle)
-            elif channel == self.grip_channel:
+            elif pin == self.grip_pin:
                 self.grip_pos = int(angle)
 
             time.sleep(delay_sec)
 
         # Final position (ensure we hit exact target)
-        self._set_servo(channel, target_angle)
+        self._set_servo(pin, target_angle)
 
         # Update tracked position
-        if channel == self.lift_channel:
+        if pin == self.lift_pin:
             self.lift_pos = target_angle
-        elif channel == self.grip_channel:
+        elif pin == self.grip_pin:
             self.grip_pos = target_angle
 
     # ========== LIFT SERVO (Rack & Pinion) ==========
@@ -217,28 +260,28 @@ class ServoController:
         """Raise lift to maximum height (smooth, slow movement)."""
         self.log(f"[SERVO] Lift UP → {self.LIFT_UP_POS}° (smooth, {self.lift_speed}°/sec)")
         if self.SMOOTH_MOVEMENT:
-            self._set_servo_smooth(self.lift_channel, self.LIFT_UP_POS, self.lift_speed)
+            self._set_servo_smooth(self.lift_pin, self.LIFT_UP_POS, self.lift_speed)
         else:
             self.lift_pos = self.LIFT_UP_POS
-            self._set_servo(self.lift_channel, self.lift_pos)
+            self._set_servo(self.lift_pin, self.lift_pos)
 
     def lift_down(self):
         """Lower lift to board level (smooth, slow movement)."""
         self.log(f"[SERVO] Lift DOWN → {self.LIFT_DOWN_POS}° (smooth, {self.lift_speed}°/sec)")
         if self.SMOOTH_MOVEMENT:
-            self._set_servo_smooth(self.lift_channel, self.LIFT_DOWN_POS, self.lift_speed)
+            self._set_servo_smooth(self.lift_pin, self.LIFT_DOWN_POS, self.lift_speed)
         else:
             self.lift_pos = self.LIFT_DOWN_POS
-            self._set_servo(self.lift_channel, self.lift_pos)
+            self._set_servo(self.lift_pin, self.lift_pos)
 
     def lift_mid(self):
         """Move lift to middle position (smooth, slow movement)."""
         self.log(f"[SERVO] Lift MID → {self.LIFT_MID_POS}° (smooth, {self.lift_speed}°/sec)")
         if self.SMOOTH_MOVEMENT:
-            self._set_servo_smooth(self.lift_channel, self.LIFT_MID_POS, self.lift_speed)
+            self._set_servo_smooth(self.lift_pin, self.LIFT_MID_POS, self.lift_speed)
         else:
             self.lift_pos = self.LIFT_MID_POS
-            self._set_servo(self.lift_channel, self.lift_pos)
+            self._set_servo(self.lift_pin, self.lift_pos)
 
     def lift_piece(self, piece_type: str):
         """
@@ -263,10 +306,10 @@ class ServoController:
         self.log(f"[SERVO] Lift {piece_type.upper()} → {lift_height}° (smooth, {self.lift_speed}°/sec)")
 
         if self.SMOOTH_MOVEMENT:
-            self._set_servo_smooth(self.lift_channel, lift_height, self.lift_speed)
+            self._set_servo_smooth(self.lift_pin, lift_height, self.lift_speed)
         else:
             self.lift_pos = lift_height
-            self._set_servo(self.lift_channel, lift_height)
+            self._set_servo(self.lift_pin, lift_height)
 
     def lift_increment(self, direction: int):
         """
@@ -282,7 +325,7 @@ class ServoController:
 
         if new_pos != self.lift_pos:
             self.lift_pos = new_pos
-            self._set_servo(self.lift_channel, self.lift_pos)
+            self._set_servo(self.lift_pin, self.lift_pos)
             self.log(f"[SERVO] Lift → {self.lift_pos}° ({'up' if direction > 0 else 'down'})")
         else:
             limit_type = "UP (274°)" if direction > 0 else "DOWN (0°)"
@@ -294,10 +337,10 @@ class ServoController:
         """Open gripper fully (smooth, slow movement to prevent damage)."""
         self.log(f"[SERVO] Gripper OPEN → {self.GRIP_OPEN_POS}° (smooth, {self.grip_speed}°/sec)")
         if self.SMOOTH_MOVEMENT:
-            self._set_servo_smooth(self.grip_channel, self.GRIP_OPEN_POS, self.grip_speed)
+            self._set_servo_smooth(self.grip_pin, self.GRIP_OPEN_POS, self.grip_speed)
         else:
             self.grip_pos = self.GRIP_OPEN_POS
-            self._set_servo(self.grip_channel, self.grip_pos)
+            self._set_servo(self.grip_pin, self.grip_pos)
 
     def grip_close(self):
         """
@@ -306,10 +349,10 @@ class ServoController:
         """
         self.log(f"[SERVO] Gripper CLOSE → {self.GRIP_CLOSED_POS}° (smooth, {self.grip_speed}°/sec)")
         if self.SMOOTH_MOVEMENT:
-            self._set_servo_smooth(self.grip_channel, self.GRIP_CLOSED_POS, self.grip_speed)
+            self._set_servo_smooth(self.grip_pin, self.GRIP_CLOSED_POS, self.grip_speed)
         else:
             self.grip_pos = self.GRIP_CLOSED_POS
-            self._set_servo(self.grip_channel, self.grip_pos)
+            self._set_servo(self.grip_pin, self.grip_pos)
 
     def grip_piece(self, piece_type: str):
         """
@@ -329,10 +372,10 @@ class ServoController:
         self.log(f"[SERVO] Gripper GRIP {piece_type.upper()} → {grip_angle}° (smooth, {self.grip_speed}°/sec)")
 
         if self.SMOOTH_MOVEMENT:
-            self._set_servo_smooth(self.grip_channel, grip_angle, self.grip_speed)
+            self._set_servo_smooth(self.grip_pin, grip_angle, self.grip_speed)
         else:
             self.grip_pos = grip_angle
-            self._set_servo(self.grip_channel, grip_angle)
+            self._set_servo(self.grip_pin, grip_angle)
 
     def grip_increment(self, direction: int):
         """
@@ -348,7 +391,7 @@ class ServoController:
 
         if new_pos != self.grip_pos:
             self.grip_pos = new_pos
-            self._set_servo(self.grip_channel, self.grip_pos)
+            self._set_servo(self.grip_pin, self.grip_pos)
             action = 'closing' if direction > 0 else 'opening'
             self.log(f"[SERVO] Gripper → {self.grip_pos}° ({action})")
         else:
@@ -535,3 +578,33 @@ class ServoController:
             return "CLOSED"
         else:
             return "PARTIAL"
+
+    # ========== CLEANUP ==========
+
+    def disconnect(self):
+        """
+        Clean up pigpio resources on shutdown.
+        IMPORTANT: Always call this when shutting down to release GPIO pins.
+        """
+        if self.is_connected and self.pi:
+            try:
+                # Turn off servo signals (set pulsewidth to 0)
+                self.pi.set_servo_pulsewidth(self.lift_pin, 0)
+                self.pi.set_servo_pulsewidth(self.grip_pin, 0)
+
+                # Stop pigpio connection
+                self.pi.stop()
+                self.pi = None
+
+                self.is_connected = False
+                self.log("[SERVO] Disconnected and cleaned up pigpio resources")
+
+            except Exception as e:
+                self.log(f"[SERVO] Cleanup error: {e}")
+        else:
+            self.log("[SERVO] Already disconnected")
+
+    def __del__(self):
+        """Destructor - ensure GPIO cleanup on object deletion."""
+        if self.is_connected:
+            self.disconnect()
