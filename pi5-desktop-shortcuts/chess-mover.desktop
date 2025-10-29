@@ -1,0 +1,9 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Chess Mover Machine
+Comment=AI-powered robotic chess board
+Exec=lxterminal -e bash -c 'cd ~/Chess-mover && python main.py; exec bash'
+Icon=applications-games
+Terminal=false
+Categories=Game;Application;
