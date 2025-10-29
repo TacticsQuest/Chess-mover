@@ -64,6 +64,8 @@ if [ ! -f ~/.local/bin/claude ]; then
     echo "⚠ Warning: Claude Code not found at ~/.local/bin/claude"
     echo "   Install it with: curl -fsSL https://claude.ai/install.sh | bash"
     echo ""
+else
+    echo "✓ Claude Code found at ~/.local/bin/claude"
 fi
 
 # Check if PATH includes ~/.local/bin

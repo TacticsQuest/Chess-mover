@@ -3,7 +3,7 @@ Version=1.0
 Type=Application
 Name=Claude Code
 Comment=AI-powered coding assistant in your terminal
-Exec=lxterminal -e bash -c 'export PATH=$HOME/.local/bin:$PATH && cd ~/Chess-mover && claude; exec bash'
+Exec=lxterminal -e bash -c 'export PATH=$HOME/.local/bin:$PATH && cd "$HOME/Chess Mover Machine" && claude; exec bash'
 Icon=terminal
 Terminal=false
 Categories=Development;
